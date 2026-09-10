@@ -1,0 +1,35 @@
+.spotify-vim-selected-play {
+  opacity: 1 !important;
+  visibility: visible !important;
+  outline: 3px solid #e7b56b !important;
+  outline-offset: 3px !important;
+  border-radius: 999px !important;
+}
+
+#spotify-vim-navigation-status {
+  position: fixed;
+  z-index: 2147483647;
+  right: 18px;
+  bottom: 105px;
+  max-width: min(520px, calc(100vw - 36px));
+  padding: 8px 12px;
+  border: 1px solid #e7b56b;
+  border-radius: 7px;
+  background: rgba(20, 15, 10, 0.96);
+  color: #f7e6ca;
+  font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+}
+
+#spotify-vim-navigation-status[data-visible="true"] {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #spotify-vim-navigation-status {
+    transition: none;
+  }
+}

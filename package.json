@@ -1,0 +1,13 @@
+{
+  "name": "spotify-vim-navigation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Release tooling for Spotify Vim Navigation",
+  "scripts": {
+    "test": "npm run test:static && npm run test:browser",
+    "test:static": "node scripts/validate.mjs",
+    "test:browser": "tests/browser-smoke.sh",
+    "test:live": "tests/live-public-smoke.sh",
+    "package": "scripts/package.sh"
+  }
+}

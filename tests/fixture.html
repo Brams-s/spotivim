@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <title>Spotify Vim Navigation fixture</title>
+    <link rel="stylesheet" href="../styles.css">
+    <style>
+      body { background: #121212; color: #fff; display: grid; grid-template-columns: 240px 1fr; font: 16px sans-serif; }
+      nav, main { padding: 16px; }
+      [role="gridcell"], [role="row"] { min-height: 44px; margin: 5px; }
+      #main-scroll { height: 220px; overflow-y: auto; }
+      button, input { min-height: 32px; }
+      [role="menu"] { position: fixed; inset: 80px auto auto 300px; background: #292929; padding: 10px; z-index: 4; }
+      [role="menuitem"] { display: block; margin: 4px; }
+      [hidden] { display: none !important; }
+      .spacer { height: 800px; }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <button id="library-control">Your Library</button>
+      <div role="grid">
+        <div role="gridcell" data-uri="spotify:playlist:uno"><div role="button" tabindex="0">Biblioteca Uno</div></div>
+        <div role="gridcell" data-uri="spotify:playlist:dos"><div role="button" tabindex="0">Biblioteca Dos</div></div>
+      </div>
+    </nav>
+    <main>
+      <input data-testid="search-input" role="combobox" aria-label="Buscar">
+      <button id="native-control">Control nativo</button>
+      <div id="main-scroll">
+        <div id="tracks"></div>
+        <div class="spacer"></div>
+      </div>
+    </main>
+    <script>
+      const tracks = document.querySelector("#tracks");
+
+      function row(uri, label, currentMarkup = false) {
+        const element = document.createElement("div");
+        element.setAttribute("role", "row");
+        element.dataset.uri = uri;
+        element.innerHTML = currentMarkup
+          ? `<div role="gridcell"><button aria-label="Reproducir ${label}"></button></div>` +
+            `<div role="gridcell"><a href="/track/${label.toLowerCase()}">${label}</a></div>` +
+            `<div role="gridcell"><button data-testid="more-button" aria-haspopup="menu">Acciones</button></div>`
+          : `<button data-testid="play-button" aria-label="Reproducir ${label}"></button>` +
+            `<button data-testid="more-button" aria-haspopup="menu">Acciones</button>`;
+        element.querySelector('[data-testid="more-button"]').addEventListener("click", toggleMenu);
+        element.addEventListener("contextmenu", (event) => { event.preventDefault(); openMenu(); });
+        return element;
+      }
+
+      function render(initial = true) {
+        tracks.replaceChildren(...(initial
+          ? [row("spotify:track:uno", "Uno"), row("spotify:track:dos", "Dos")]
+          : [row("spotify:track:dos", "Dos", true), row("spotify:track:cuatro", "Cuatro", true)]
+        ));
+      }
+
+      function menuItem(label, action) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.setAttribute("role", "menuitem");
+        button.textContent = label;
+        button.addEventListener("click", action);
+        return button;
+      }
+
+      function toggleMenu() {
+        const menus = [...document.querySelectorAll('[role="menu"]')];
+        if (menus.length > 0) {
+          if (document.body.dataset.stubbornMenu === "true") return;
+          menus.forEach((menu) => menu.remove());
+          return;
+        }
+        openMenu();
+      }
+
+      function openMenu() {
+        setTimeout(() => {
+          document.querySelectorAll('[role="menu"]').forEach((menu) => menu.remove());
+          const menu = document.createElement("div");
+          menu.setAttribute("role", "menu");
+          const addToPlaylist = menuItem("Añadir a una lista", () => openNestedMenu(menu));
+          addToPlaylist.setAttribute("aria-expanded", "false");
+          addToPlaylist.addEventListener("focus", () => {
+            addToPlaylist.setAttribute("aria-expanded", "true");
+            openNestedMenu(menu);
+          });
+          menu.append(
+            menuItem("Agregar a la cola", () => { document.body.dataset.action = "queue"; menu.remove(); }),
+            addToPlaylist
+          );
+          document.body.append(menu);
+        }, 80);
+      }
+
+      function openNestedMenu(parent) {
+        setTimeout(() => {
+          const menu = document.createElement("div");
+          menu.setAttribute("role", "menu");
+          const searchItem = document.createElement("div");
+          searchItem.setAttribute("role", "menuitem");
+          searchItem.innerHTML = '<input role="searchbox" aria-label="Buscar lista">';
+          const newPlaylist = menuItem("Nueva lista", () => {});
+          const focusPlaylist = menuItem("Focus Mix", () => choosePlaylist("focus"));
+          const jazzPlaylist = menuItem("Jazz", () => choosePlaylist("jazz"));
+          const playlists = [focusPlaylist, jazzPlaylist];
+          searchItem.querySelector("input").addEventListener("input", (event) => {
+            const query = event.target.value.toLowerCase();
+            playlists.forEach((item) => {
+              item.hidden = !item.textContent.toLowerCase().includes(query);
+            });
+          });
+          const choosePlaylist = (name) => {
+            document.body.dataset.action = name;
+            parent.remove();
+            menu.remove();
+          };
+          menu.append(searchItem, newPlaylist, ...playlists);
+          document.body.append(menu);
+        }, 80);
+      }
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        if (document.body.dataset.ignoreMenuEscape === "true") return;
+        document.querySelectorAll('[role="menu"]').forEach((menu) => menu.remove());
+      });
+
+      window.replaceTracks = () => render(false);
+      document.querySelectorAll('[role="gridcell"] [role="button"]').forEach((item) => {
+        item.addEventListener("click", () => document.querySelector("#library-control").focus());
+      });
+      render();
+      document.body.dataset.ready = "true";
+    </script>
+  </body>
+</html>

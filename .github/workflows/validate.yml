@@ -1,0 +1,33 @@
+name: Validate release candidate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Static validation
+        run: npm run test:static
+      - name: Install browser test driver
+        run: |
+          npm install --global agent-browser
+          agent-browser install --with-deps
+      - name: Browser fixture tests
+        run: npm run test:browser
+      - name: Build clean extension archive
+        run: npm run package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spotify-vim-navigation-0.1.0-rc.1
+          path: dist/spotify-vim-navigation-0.1.0-rc.1.zip
+          if-no-files-found: error
