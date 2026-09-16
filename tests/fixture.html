@@ -32,6 +32,12 @@
         <div class="spacer"></div>
       </div>
     </main>
+    <footer data-testid="now-playing-bar">
+      <div data-testid="now-playing-widget">
+        <a data-testid="context-item-link" href="/track/now-playing">Now playing</a>
+        <button id="now-playing-more" data-testid="more-button" aria-haspopup="menu">Current actions</button>
+      </div>
+    </footer>
     <script>
       const tracks = document.querySelector("#tracks");
 
@@ -66,7 +72,8 @@
         return button;
       }
 
-      function toggleMenu() {
+      function toggleMenu(event) {
+        if (event?.currentTarget?.id) document.body.dataset.menuSource = event.currentTarget.id;
         const menus = [...document.querySelectorAll('[role="menu"]')];
         if (menus.length > 0) {
           if (document.body.dataset.stubbornMenu === "true") return;
@@ -131,6 +138,12 @@
       window.replaceTracks = () => render(false);
       document.querySelectorAll('[role="gridcell"] [role="button"]').forEach((item) => {
         item.addEventListener("click", () => document.querySelector("#library-control").focus());
+      });
+      document.querySelector("#now-playing-more").addEventListener("click", toggleMenu);
+      document.querySelector('[data-testid="context-item-link"]').addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        document.body.dataset.menuSource = "now-playing-link";
+        openMenu();
       });
       render();
       document.body.dataset.ready = "true";

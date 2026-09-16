@@ -25,6 +25,7 @@ build cached.
 | `j` / `k` | Move selection down / up |
 | `Enter` | Open library item or choose an action-menu item |
 | `a` | Open Spotify's action menu for the selection |
+| `Shift+A` | Open Spotify's action menu for the currently playing track or playlist context |
 | `/` | Focus Spotify search |
 | `gg` / `G` | Scroll main content to top / bottom |
 | `H` / `L` | Browser history back / forward |

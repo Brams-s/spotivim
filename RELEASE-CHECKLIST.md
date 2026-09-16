@@ -9,7 +9,7 @@ Static checks:
 Manual browser checks (Chrome and Chromium):
 
 - [ ] Home, Search, playlist, album, artist, Liked Songs, Queue, and Podcasts pages.
-- [ ] Library/main movement; `j`/`k`; `Enter`; `a` action menu; nested action menu; `/`; `gg`/`G`; `H`/`L`; `Esc`; toggle.
+- [ ] Library/main movement; `j`/`k`; `Enter`; `a` selection menu; `Shift+A` now-playing menu; nested action menu; `/`; `gg`/`G`; `H`/`L`; `Esc`; toggle.
 - [ ] Loading/empty states and a long virtualized playlist after scroll/rerender.
 - [ ] English plus two non-English Spotify UI locales.
 - [ ] Slow menu opening and page rerenders.

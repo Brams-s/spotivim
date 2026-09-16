@@ -15,6 +15,7 @@
   let lastMenuSelection = null;
   let menuOriginPane = "main";
   let menuOriginSelection = null;
+  let menuOriginActionTarget = null;
   let forwardingMenuEscape = false;
   let pendingG = false;
   let pendingGTimer = 0;
@@ -74,6 +75,20 @@
   function activeActionMenu() {
     const menus = [...document.querySelectorAll('[role="menu"]')].filter(visible);
     return menus.at(-1) || null;
+  }
+
+  function nowPlayingWidget() {
+    const selectors = [
+      '[data-testid="now-playing-widget"]',
+      '.main-nowPlayingWidget-nowPlaying',
+      '[data-testid="now-playing-bar"]',
+      '.main-nowPlayingBar-left'
+    ];
+    for (const selector of selectors) {
+      const widget = [...document.querySelectorAll(selector)].find(visible);
+      if (widget) return widget;
+    }
+    return null;
   }
 
   function menuForSelection() {
@@ -383,29 +398,34 @@
   function moreOptionsButton(item) {
     const row = item.closest('[role="row"]');
     const gridCell = item.closest('[role="gridcell"]');
+    if (!row && !gridCell) {
+      const local = item.querySelector('button[data-testid="more-button"], button[aria-haspopup="menu"]');
+      if (local) return local;
+    }
     const scope = row || gridCell || item.parentElement;
     if (!(scope instanceof HTMLElement)) return null;
     return scope.querySelector('button[data-testid="more-button"], button[aria-haspopup="menu"]');
   }
 
-  async function openActions() {
-    if (!selectedIsUsable() || pane === "menu") {
+  async function openActions(target = selected) {
+    if (!(target instanceof HTMLElement) || !visible(target) || pane === "menu") {
       flash("Select a library item or track first.");
       return;
     }
 
     menuOriginPane = pane;
     menuOriginSelection = selected;
+    menuOriginActionTarget = target;
     lastMenuSelection = null;
 
     const existingMenu = activeActionMenu();
     const existingItems = actionMenuItems(existingMenu);
-    const more = moreOptionsButton(selected);
+    const more = moreOptionsButton(target);
     if (visible(more)) {
       more.click();
     } else {
-      const rect = selected.getBoundingClientRect();
-      selected.dispatchEvent(new MouseEvent("contextmenu", {
+      const rect = target.getBoundingClientRect();
+      target.dispatchEvent(new MouseEvent("contextmenu", {
         bubbles: true,
         cancelable: true,
         view: window,
@@ -420,6 +440,23 @@
     if (!menu || !selectFirstActionMenuItem(menu)) {
       flash("Spotify did not open an action menu for this item.");
     }
+  }
+
+  function openNowPlayingActions() {
+    const widget = nowPlayingWidget();
+    if (!widget) {
+      flash("No currently playing track or playlist is available.");
+      return;
+    }
+    const contextItem = widget.querySelector([
+      '[data-testid="context-item-link"]',
+      '[data-testid="context-item-info-title"] a',
+      'a[href*="/track/"]',
+      'a[href*="/episode/"]',
+      'a[href*="/playlist/"]',
+      'a[href*="/album/"]'
+    ].join(", "));
+    openActions(contextItem instanceof HTMLElement && visible(contextItem) ? contextItem : widget);
   }
 
   function activateMenuItem() {
@@ -465,8 +502,10 @@
   function restoreMenuOrigin() {
     const originPane = menuOriginPane;
     const originSelection = menuOriginSelection;
-    const identity = originPane === "sidebar" ? lastSidebarIdentity : lastMainIdentity;
     const items = originPane === "sidebar" ? sidebarItems() : playableButtons();
+    const identity = originSelection
+      ? (originPane === "sidebar" ? lastSidebarIdentity : lastMainIdentity)
+      : null;
     const index = rememberedIndex(items, originSelection, identity);
 
     clearSelection();
@@ -503,7 +542,7 @@
       return;
     }
 
-    const more = moreOptionsButton(menuOriginSelection);
+    const more = moreOptionsButton(menuOriginActionTarget);
     if (more instanceof HTMLElement) more.click();
     if (await waitForActionMenusClosed(320)) {
       restoreMenuOrigin();
@@ -649,6 +688,13 @@
       return;
     }
 
+    if (event.key === "A" && event.shiftKey) {
+      event.preventDefault();
+      clearPendingG();
+      openNowPlayingActions();
+      return;
+    }
+
     if (!canHandleShortcut(event)) return;
 
     if (event.key === "Escape") {
@@ -751,7 +797,7 @@
 
     if (event.key === "?") {
       event.preventDefault();
-      flash("h/l panes · j/k move · a actions · menus: j/k wrap, / search, h/Esc close, l/Enter choose · gg/G scroll · H/L history · Alt+Shift+V toggle", 7000);
+      flash("h/l panes · j/k move · a selection actions · Shift+A now-playing actions · menus: j/k wrap, / search, h/Esc close, l/Enter choose · gg/G scroll · H/L history · Alt+Shift+V toggle", 7000);
     }
   }, true);
 })();

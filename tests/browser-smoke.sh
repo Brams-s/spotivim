@@ -34,6 +34,15 @@ for _ in {1..3}; do
   "${browser[@]}" wait --fn 'document.querySelector(".spotify-vim-selected-play")?.getAttribute("aria-label") === "Reproducir Cuatro"' >/dev/null
 done
 
+# Shift+A opens the now-playing widget's menu instead of the selected row's
+# menu, and returns to the existing selection when dismissed.
+"${browser[@]}" press Shift+A >/dev/null
+"${browser[@]}" wait --fn 'document.body.dataset.menuSource === "now-playing-more"' >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("[role=menu] .spotify-vim-selected-play")?.textContent === "Agregar a la cola"' >/dev/null
+"${browser[@]}" press Escape >/dev/null
+"${browser[@]}" wait --fn 'document.querySelectorAll("[role=menu]").length === 0' >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector(".spotify-vim-selected-play")?.getAttribute("aria-label") === "Reproducir Cuatro"' >/dev/null
+
 # A playlist query with no matches must still let Escape return navigation to
 # the menu, and a second Escape must close the entire action stack.
 "${browser[@]}" press a >/dev/null
@@ -128,6 +137,18 @@ done
 "${browser[@]}" press / >/dev/null
 "${browser[@]}" wait --fn 'document.activeElement?.dataset.testid === "search-input"' >/dev/null
 "${browser[@]}" press j >/dev/null
+"${browser[@]}" wait --fn 'document.querySelectorAll(".spotify-vim-selected-play").length === 0' >/dev/null
+
+# The now-playing shortcut remains available when no extension selection owns
+# focus, unlike selection-based a. When Spotify does not expose a visible More
+# button, its track/playlist link receives the native context-menu event.
+"${browser[@]}" eval 'document.activeElement.blur()' >/dev/null
+"${browser[@]}" eval 'document.querySelector("#now-playing-more").hidden = true' >/dev/null
+"${browser[@]}" press Shift+A >/dev/null
+"${browser[@]}" wait --fn 'document.body.dataset.menuSource === "now-playing-link"' >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("[role=menu] .spotify-vim-selected-play")?.textContent === "Agregar a la cola"' >/dev/null
+"${browser[@]}" press Escape >/dev/null
+"${browser[@]}" wait --fn 'document.querySelectorAll("[role=menu]").length === 0' >/dev/null
 "${browser[@]}" wait --fn 'document.querySelectorAll(".spotify-vim-selected-play").length === 0' >/dev/null
 
 "${browser[@]}" eval 'document.querySelector("#native-control").focus()' >/dev/null
