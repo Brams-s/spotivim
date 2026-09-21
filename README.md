@@ -2,8 +2,9 @@
 
 Keyboard-first navigation for the [Spotify Web Player](https://open.spotify.com).
 
-> Release candidate `0.1.0-rc.1`: use it for testing, not as a promise of
-> compatibility with every Spotify UI experiment or locale.
+> Stable release `0.1.0`. Spotify controls its web UI and can change it without
+> notice; this release is not a promise of compatibility with every UI
+> experiment or locale.
 
 ## Install locally
 
@@ -49,7 +50,7 @@ change conflicts with a shortcut. The toggle resets when the page reloads.
   newly rendered rows may need a fresh `j`/`k` selection.
 - Spotify controls its UI and can change it without notice. The extension is
   tested first against English Spotify Web; locale coverage is a release-gate
-  test item, not a guarantee in this RC.
+  test item, not a compatibility guarantee.
 - It does not provide playback hotkeys, volume control, Connect-device control,
   background playback, or desktop status-bar integration.
 - No Spotify password, OAuth token, or account data is requested or stored.
@@ -58,6 +59,13 @@ change conflicts with a shortcut. The toggle resets when the page reloads.
 
 Read [PRIVACY.md](PRIVACY.md) for the data-use statement. Licensed under the
 [MIT License](LICENSE).
+
+- Project home: <https://github.com/Brams-s/spotivim>
+- Support: <https://github.com/Brams-s/spotivim/issues>
+- Privacy policy: <https://github.com/Brams-s/spotivim/blob/main/PRIVACY.md>
+
+The repository is public. These URLs have been verified to return anonymous
+HTTP 200 responses.
 
 Spotify Vim Navigation is an independent project and is not affiliated with,
 endorsed by, or sponsored by Spotify. Spotify is a trademark of Spotify AB.

@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 root=$(cd -- "$script_dir/.." && pwd)
-archive="$root/dist/spotify-vim-navigation-0.1.0-rc.1.zip"
+archive="$root/dist/spotify-vim-navigation-0.1.0.zip"
 
 node "$script_dir/validate.mjs"
 command -v zip >/dev/null || {

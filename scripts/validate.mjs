@@ -7,14 +7,14 @@ const requiredFiles = [
   "content.js", "styles.css", "README.md", "LICENSE", "PRIVACY.md", "STORE-LISTING.md",
   "CONTRIBUTING.md", "SECURITY.md", "RELEASE-CHECKLIST.md", "tests/fixture.html",
   "tests/browser-smoke.sh", "tests/live-public-smoke.sh", ".github/workflows/validate.yml",
-  "store-assets/promo-440x280.png",
+  "store-assets/promo-440x280.png", "store-assets/live-screenshot-capture-guide.md",
   "icons/icon-16.png", "icons/icon-32.png", "icons/icon-48.png", "icons/icon-128.png"
 ];
 
 const manifest = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
 if (manifest.manifest_version !== 3) throw new Error("Manifest must use Manifest V3.");
 if (manifest.version !== "0.1.0") throw new Error("Expected release version 0.1.0.");
-if (!manifest.version_name?.includes("rc")) throw new Error("Expected an RC version_name.");
+if ("version_name" in manifest) throw new Error("Stable release must not include version_name.");
 if (manifest.description.length > 132) throw new Error("Manifest description exceeds the store limit.");
 if (Object.keys(manifest.icons || {}).length < 4) throw new Error("Required icon sizes are missing.");
 if (manifest.permissions?.length) throw new Error("This extension must not request optional permissions.");
@@ -45,4 +45,4 @@ await assertPngDimensions("store-assets/promo-440x280.png", 440, 280);
 const syntax = spawnSync(process.execPath, ["--check", `${root}/content.js`], { encoding: "utf8" });
 if (syntax.status !== 0) throw new Error(syntax.stderr || "content.js syntax check failed.");
 
-console.log("Spotify Vim Navigation release-candidate static checks passed.");
+console.log("Spotify Vim Navigation 0.1.0 stable-release static checks passed.");

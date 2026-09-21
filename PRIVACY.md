@@ -2,14 +2,20 @@
 
 Spotify Vim Navigation runs only on `https://open.spotify.com/*`.
 
-It reads the visible Spotify page structure and adds a temporary selection
-outline/status message so it can navigate visible library rows, track Play
-buttons, and Spotify action menus. It may dispatch the same page-level click
-or context-menu events a user would use to open an item or its action menu.
+The extension locally reads visible Spotify page content to identify the
+library, tracks, and action menus. It adds transient selection and status UI,
+dispatches page-level click, context-menu, and keyboard events in response to
+its shortcuts, and uses browser history navigation for its `H` and `L` keys.
 
-It does not collect, transmit, sell, or share data. It has no analytics,
+It does not collect, transmit, sell, share, or store data. It has no analytics,
 remote code, background service worker, storage permission, cookies, account
-access, or network requests of its own. Spotify's own site and account terms
-continue to apply.
+access, or network requests of its own. It does access Spotify page content
+locally; this is limited to the visible page structure needed for navigation.
+Spotify's own site and account terms continue to apply.
 
-Support: open an issue in the project repository once it is published.
+- Homepage: <https://github.com/Brams-s/spotivim>
+- Support: <https://github.com/Brams-s/spotivim/issues>
+- Privacy policy: <https://github.com/Brams-s/spotivim/blob/main/PRIVACY.md>
+
+The repository is public. These URLs have been verified to return anonymous
+HTTP 200 responses.
