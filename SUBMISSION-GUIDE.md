@@ -12,9 +12,9 @@ Do **not** submit until all of these are complete:
   - <https://github.com/Brams-s/spotivim>
   - <https://github.com/Brams-s/spotivim/issues>
   - <https://github.com/Brams-s/spotivim/blob/main/PRIVACY.md>
-- [ ] Current release documentation is committed and pushed, and GitHub Actions
-  has passed. Until then, the public GitHub pages show the prior committed RC
-  content.
+- [x] Current release documentation is public, and the
+  [Validate stable release](https://github.com/Brams-s/spotivim/actions/runs/35641080233)
+  workflow passed, including archive upload.
 - [ ] The signed-in manual browser matrix in `RELEASE-CHECKLIST.md` is complete.
 - [ ] A real 1280×800 live-product screenshot has been captured using a
   dedicated sanitized signed-in account with the right panel closed. Follow
@@ -28,8 +28,7 @@ Do **not** submit until all of these are complete:
 2. Run `npm run package`; upload only
    `dist/spotify-vim-navigation-0.1.0.zip`.
 3. Keep the package, test evidence, and remaining release gates recorded in
-   `RELEASE-CHECKLIST.md`. CI is still pending for the current uncommitted
-   changes.
+   `RELEASE-CHECKLIST.md`.
 
 ## Dashboard steps
 

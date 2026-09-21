@@ -10,7 +10,7 @@ Repository-proven static facts:
 Validation evidence:
 
 - [x] `npm test` passed locally.
-- [ ] Commit and push the current release documentation, then verify `npm test` passes in GitHub Actions. The public GitHub pages still show the prior committed RC content until these local changes are pushed.
+- [x] Stable release documentation is public, and the [Validate stable release](https://github.com/Brams-s/spotivim/actions/runs/35641080233) workflow passed, including archive upload.
 - [x] `npm run test:live` passed against public signed-out Spotify.
 - [x] `npm run package` created `dist/spotify-vim-navigation-0.1.0.zip` containing only `manifest.json`, `content.js`, `styles.css`, and the four icons.
 - [x] An isolated Chromium session loaded the unpacked extension. `chrome://extensions` showed Spotify Vim Navigation enabled with no error button, and live Spotify reported extension version `0.1.0` with a working selection.
