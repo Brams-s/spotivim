@@ -78,6 +78,5 @@ and signed-in state.
 
 - Extension icons: `icons/` (`16`, `32`, `48`, and `128` pixels)
 - Small promotional image: `store-assets/promo-440x280.png`
-- Required live-product screenshot: capture it during the final manual Spotify
-  test using `store-assets/live-screenshot-capture-guide.md`. The screenshot is
-  not yet included in the repository.
+- Required live-product screenshot: `store-assets/screenshot-live-1280x800.png`
+  (1280×800 PNG)

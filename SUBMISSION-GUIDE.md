@@ -16,10 +16,8 @@ Do **not** submit until all of these are complete:
   [Validate stable release](https://github.com/Brams-s/spotivim/actions/runs/35641080233)
   workflow passed, including archive upload.
 - [ ] The signed-in manual browser matrix in `RELEASE-CHECKLIST.md` is complete.
-- [ ] A real 1280×800 live-product screenshot has been captured using a
-  dedicated sanitized signed-in account with the right panel closed. Follow
-  `store-assets/live-screenshot-capture-guide.md`; the signed-out candidate was
-  rejected because of a persistent signup banner and status overlap.
+- [x] The designer-accepted real 1280×800 live-product screenshot is included
+  at `store-assets/screenshot-live-1280x800.png`.
 
 ## Prerequisites
 
@@ -36,7 +34,8 @@ Do **not** submit until all of these are complete:
    `dist/spotify-vim-navigation-0.1.0.zip`.
 2. On the Store listing tab, copy the name, summary, description, public URLs,
    permission rationale, and reviewer instructions from `STORE-LISTING.md`.
-   Upload `store-assets/promo-440x280.png` and the real 1280×800 screenshot.
+   Upload `store-assets/promo-440x280.png` and
+   `store-assets/screenshot-live-1280x800.png`.
    Choose **Productivity**, **English**, **Public**, and **all regions**. Select
    **not mature** wherever the dashboard asks for mature-content status.
 3. On the Privacy tab, state the single purpose: keyboard-first navigation of

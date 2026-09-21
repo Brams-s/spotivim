@@ -7,7 +7,8 @@ const requiredFiles = [
   "content.js", "styles.css", "README.md", "LICENSE", "PRIVACY.md", "STORE-LISTING.md",
   "CONTRIBUTING.md", "SECURITY.md", "RELEASE-CHECKLIST.md", "tests/fixture.html",
   "tests/browser-smoke.sh", "tests/live-public-smoke.sh", ".github/workflows/validate.yml",
-  "store-assets/promo-440x280.png", "store-assets/live-screenshot-capture-guide.md",
+  "store-assets/promo-440x280.png", "store-assets/screenshot-live-1280x800.png",
+  "store-assets/live-screenshot-capture-guide.md",
   "icons/icon-16.png", "icons/icon-32.png", "icons/icon-48.png", "icons/icon-128.png"
 ];
 
@@ -41,6 +42,7 @@ for (const size of [16, 32, 48, 128]) {
   await assertPngDimensions(`icons/icon-${size}.png`, size, size);
 }
 await assertPngDimensions("store-assets/promo-440x280.png", 440, 280);
+await assertPngDimensions("store-assets/screenshot-live-1280x800.png", 1280, 800);
 
 const syntax = spawnSync(process.execPath, ["--check", `${root}/content.js`], { encoding: "utf8" });
 if (syntax.status !== 0) throw new Error(syntax.stderr || "content.js syntax check failed.");

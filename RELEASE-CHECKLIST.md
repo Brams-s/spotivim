@@ -32,6 +32,6 @@ Store gate:
 
 - [x] Add homepage, support, and privacy-policy URLs to `STORE-LISTING.md`.
 - [x] `https://github.com/Brams-s/spotivim` is public; homepage, issues, and privacy-policy URLs returned anonymous HTTP 200 responses.
-- [ ] Capture a real 1280×800 live-product screenshot using a dedicated sanitized signed-in account with the right panel closed. The signed-out candidate was rejected because of a persistent signup banner and status overlap.
+- [x] Designer-accepted real 1280×800 live-product screenshot is included at `store-assets/screenshot-live-1280x800.png`.
 - [ ] Complete the Chrome Web Store privacy-practices form.
 - [ ] Check trademarks and store metadata one final time.
