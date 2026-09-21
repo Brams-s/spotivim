@@ -1,4 +1,4 @@
-name: Validate release candidate
+name: Validate stable release
 
 on:
   push:
@@ -28,6 +28,6 @@ jobs:
         run: npm run package
       - uses: actions/upload-artifact@v4
         with:
-          name: spotify-vim-navigation-0.1.0-rc.1
-          path: dist/spotify-vim-navigation-0.1.0-rc.1.zip
+          name: spotify-vim-navigation-0.1.0
+          path: dist/spotify-vim-navigation-0.1.0.zip
           if-no-files-found: error
