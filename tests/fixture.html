@@ -40,6 +40,18 @@
     </footer>
     <script>
       const tracks = document.querySelector("#tracks");
+      const fixtureGates = {};
+
+      function waitForFixtureGate(name) {
+        document.body.dataset[`${name}Pending`] = "true";
+        if (document.body.dataset[`${name}Gate`] !== "true") return Promise.resolve();
+        return new Promise((resolve) => { fixtureGates[name] = resolve; });
+      }
+
+      function releaseFixtureGate(name) {
+        fixtureGates[name]?.();
+        delete fixtureGates[name];
+      }
 
       function row(uri, label, currentMarkup = false) {
         const element = document.createElement("div");
@@ -72,10 +84,110 @@
         return button;
       }
 
+      function showFixtureDialog(kind = "role") {
+        document.querySelectorAll('[role="menu"]').forEach((menu) => menu.remove());
+        const dialog = kind === "native" ? document.createElement("dialog") : document.createElement("div");
+        dialog.id = "fixture-dialog";
+        if (kind === "alert") dialog.setAttribute("role", "alertdialog");
+        else if (kind !== "native") dialog.setAttribute("role", "dialog");
+        if (kind === "native") dialog.open = true;
+        const button = document.createElement("button");
+        button.id = "fixture-dialog-button";
+        button.textContent = "Confirmar diálogo";
+        dialog.append(button);
+        document.body.append(dialog);
+        button.focus();
+      }
+
+      function openFollowUpMenu(retainParent = false) {
+        if (!retainParent) document.querySelectorAll('[role="menu"]').forEach((menu) => menu.remove());
+        const menu = document.createElement("div");
+        menu.id = "fixture-follow-up-menu";
+        menu.setAttribute("role", "menu");
+        menu.tabIndex = -1;
+        const item = menuItem("Seguir", () => { document.body.dataset.action = "follow"; });
+        item.id = "fixture-follow-up-item";
+        menu.append(item);
+        document.body.append(menu);
+        item.focus();
+      }
+
+      function completeAction(name, menu) {
+        document.body.dataset.action = name;
+        document.body.dataset.actionAt = String(performance.now());
+        if (document.body.dataset.actionMode === "dialog") showFixtureDialog();
+        else if (document.body.dataset.actionMode === "follow-up") openFollowUpMenu();
+        else if (document.body.dataset.actionMode === "follow-up-retain") openFollowUpMenu(true);
+        else menu.remove();
+      }
+
+      function focusFixtureOtherMenu() {
+        const menu = document.createElement("div");
+        menu.id = "fixture-other-menu";
+        menu.setAttribute("role", "menu");
+        menu.tabIndex = -1;
+        const item = menuItem("Otra acción", () => {});
+        item.id = "fixture-other-menu-item";
+        menu.append(item);
+        document.body.append(menu);
+        item.focus();
+      }
+
+      function createFixtureUnrelatedMenu() {
+        const menu = document.createElement("div");
+        menu.id = "fixture-unrelated-menu";
+        menu.setAttribute("role", "menu");
+        menu.tabIndex = -1;
+        const item = menuItem("Acción no relacionada", () => {});
+        item.id = "fixture-unrelated-menu-item";
+        menu.append(item);
+        document.body.append(menu);
+      }
+
+      function dispatchFixtureKey(key, options = {}) {
+        const target = document.activeElement instanceof HTMLElement ? document.activeElement : document.body;
+        target.dispatchEvent(new KeyboardEvent("keydown", {
+          key,
+          bubbles: true,
+          cancelable: true,
+          ...options
+        }));
+      }
+
+      function appendRootMenuChoices(menu) {
+        const addToPlaylist = menuItem("Añadir a una lista", () => openNestedMenu(menu));
+        addToPlaylist.setAttribute("aria-expanded", "false");
+        addToPlaylist.addEventListener("focus", () => {
+          addToPlaylist.setAttribute("aria-expanded", "true");
+          if (document.body.dataset.submenuFocusOpens !== "false") openNestedMenu(menu);
+        });
+        const queue = menuItem("Agregar a la cola", () => completeAction("queue", menu));
+        if (document.body.dataset.preexistingMenuAria === "true") {
+          queue.id = "fixture-existing-menu-item";
+          const nativeRef = document.createElement("span");
+          nativeRef.id = "fixture-existing-active";
+          nativeRef.textContent = "Native active reference";
+          menu.append(nativeRef);
+          menu.setAttribute("aria-activedescendant", "fixture-existing-active");
+        }
+        menu.append(queue, addToPlaylist);
+        return queue;
+      }
+
       function toggleMenu(event) {
+        document.body.dataset.moreClicks = String(Number(document.body.dataset.moreClicks || 0) + 1);
+        const row = event?.currentTarget?.closest?.('[role="row"]');
+        if (row?.dataset.uri) document.body.dataset.lastMoreUri = row.dataset.uri;
+        if (document.body.dataset.closeFocusOnMore === "true" && document.body.dataset.moreClicks === "2") {
+          focusFixtureOtherMenu();
+        }
         if (event?.currentTarget?.id) document.body.dataset.menuSource = event.currentTarget.id;
         const menus = [...document.querySelectorAll('[role="menu"]')];
         if (menus.length > 0) {
+          if (document.body.dataset.allowOpenWithExisting === "true") {
+            openMenu();
+            return;
+          }
           if (document.body.dataset.stubbornMenu === "true") return;
           menus.forEach((menu) => menu.remove());
           return;
@@ -83,28 +195,103 @@
         openMenu();
       }
 
-      function openMenu() {
-        setTimeout(() => {
-          document.querySelectorAll('[role="menu"]').forEach((menu) => menu.remove());
+      async function openMenu() {
+        await waitForFixtureGate("menu");
+        setTimeout(async () => {
+          delete document.body.dataset.menuPending;
+          document.body.dataset.menuMounted = String(Number(document.body.dataset.menuMounted || 0) + 1);
+          if (document.body.dataset.retainExistingMenus !== "true") {
+            document.querySelectorAll('[role="menu"]').forEach((menu) => menu.remove());
+          }
           const menu = document.createElement("div");
+          menu.id = "fixture-requested-menu";
           menu.setAttribute("role", "menu");
-          const addToPlaylist = menuItem("Añadir a una lista", () => openNestedMenu(menu));
-          addToPlaylist.setAttribute("aria-expanded", "false");
-          addToPlaylist.addEventListener("focus", () => {
-            addToPlaylist.setAttribute("aria-expanded", "true");
-            openNestedMenu(menu);
-          });
-          menu.append(
-            menuItem("Agregar a la cola", () => { document.body.dataset.action = "queue"; menu.remove(); }),
-            addToPlaylist
-          );
+          if (document.body.dataset.preexistingMenuAria === "true") {
+            menu.setAttribute("aria-activedescendant", "fixture-existing-active");
+          }
           document.body.append(menu);
-        }, 80);
+          if (document.body.dataset.menuShell === "true") {
+            document.body.dataset.menuShellMounted = "true";
+            await waitForFixtureGate("menuItems");
+            appendRootMenuChoices(menu);
+            document.body.dataset.menuShellItemsMounted = "true";
+            return;
+          }
+          const queue = appendRootMenuChoices(menu);
+          let initialInput = null;
+          if (document.body.dataset.menuAutoFocusInput === "true" ||
+            document.body.dataset.menuContainerThenInput === "true") {
+            const input = document.createElement("input");
+            input.id = "fixture-requested-menu-input";
+            input.setAttribute("role", "searchbox");
+            input.setAttribute("aria-label", "Buscar lista nueva");
+            menu.append(input);
+            initialInput = input;
+          }
+          if (document.body.dataset.menuContainerThenInput === "true") {
+            menu.tabIndex = -1;
+            menu.focus();
+            initialInput.focus();
+          } else if (initialInput) {
+            initialInput.focus();
+          } else if (document.body.dataset.menuAutoFocusFirst === "true") {
+            queue.focus();
+          }
+          if (document.body.dataset.menuReplacement === "true") {
+            const replacement = document.createElement("div");
+            replacement.id = "fixture-replacement-menu";
+            replacement.setAttribute("role", "menu");
+            replacement.append(menuItem("Reemplazo", () => {}));
+            document.body.append(replacement);
+          }
+        }, Number(document.body.dataset.menuDelay || 80));
       }
 
-      function openNestedMenu(parent) {
+      async function openNestedMenu(parent) {
+        document.body.dataset.submenuOpens = String(Number(document.body.dataset.submenuOpens || 0) + 1);
+        await waitForFixtureGate("submenu");
         setTimeout(() => {
-          const menu = document.createElement("div");
+          delete document.body.dataset.submenuPending;
+          document.body.dataset.submenuMounted = String(Number(document.body.dataset.submenuMounted || 0) + 1);
+          if (document.body.dataset.submenuSameUnchanged === "true") {
+            parent.replaceChildren();
+            appendRootMenuChoices(parent);
+            return;
+          }
+          if (document.body.dataset.submenuSameRepurposed === "true") {
+            const reused = [...parent.querySelectorAll(':scope > [role="menuitem"]')];
+            reused[0].textContent = "Acción de submenú reutilizada A";
+            reused[1].textContent = "Acción de submenú reutilizada B";
+            document.body.dataset.submenuConstantNodes = String(reused.length);
+            return;
+          }
+          if (document.body.dataset.submenuAriaMutation === "true") {
+            const reused = [...parent.querySelectorAll(':scope > [role="menuitem"]')];
+            reused[0].setAttribute("aria-label", "Acción aria de submenú");
+            document.body.dataset.submenuConstantNodes = String(reused.length);
+            return;
+          }
+          if (document.body.dataset.submenuTextMutation === "true") {
+            const reused = [...parent.querySelectorAll(':scope > [role="menuitem"]')];
+            reused[0].firstChild.nodeValue = "Acción texto de submenú";
+            document.body.dataset.submenuConstantNodes = String(reused.length);
+            return;
+          }
+          if (document.body.dataset.submenuDisabledFalse === "true") {
+            parent.querySelectorAll(':scope > [role="menuitem"]').forEach((item) => item.setAttribute("aria-disabled", "false"));
+            return;
+          }
+          if (document.body.dataset.submenuSearchOnly === "true") {
+            parent.replaceChildren();
+            const search = document.createElement("input");
+            search.id = "fixture-submenu-search";
+            search.setAttribute("role", "searchbox");
+            search.setAttribute("aria-label", "Buscar lista");
+            parent.append(search);
+            return;
+          }
+          const menu = document.body.dataset.submenuSameContainer === "true" ? parent : document.createElement("div");
+          if (menu === parent) menu.replaceChildren();
           menu.setAttribute("role", "menu");
           const searchItem = document.createElement("div");
           searchItem.setAttribute("role", "menuitem");
@@ -125,17 +312,311 @@
             menu.remove();
           };
           menu.append(searchItem, newPlaylist, ...playlists);
-          document.body.append(menu);
+          if (menu !== parent) document.body.append(menu);
         }, 80);
       }
 
       document.addEventListener("keydown", (event) => {
+        if (event.key === "j") document.body.dataset.postActionKeyAt = String(performance.now());
         if (event.key !== "Escape") return;
         if (document.body.dataset.ignoreMenuEscape === "true") return;
         document.querySelectorAll('[role="menu"]').forEach((menu) => menu.remove());
       });
 
       window.replaceTracks = () => render(false);
+      window.fixtureSafety = {
+        recycleSelectedMain() {
+          const play = document.querySelector("main .spotify-vim-selected-play");
+          const row = play.closest('[role="row"]');
+          row.dataset.uri = "spotify:track:replacement";
+          play.setAttribute("aria-label", "Reproducir Reemplazo");
+        },
+        recycleSelectedSidebar() {
+          const item = document.querySelector("nav .spotify-vim-selected-play");
+          const cell = item.closest('[role="gridcell"]');
+          cell.dataset.uri = "spotify:playlist:replacement";
+          item.textContent = "Biblioteca Reemplazo";
+        },
+        removeSelectedMainPlay() {
+          const play = document.querySelector("main .spotify-vim-selected-play");
+          const row = play.closest('[role="row"]');
+          row.id = "fixture-selected-row";
+          play.remove();
+        },
+        reparentSelectedMain() {
+          const play = document.querySelector("main .spotify-vim-selected-play");
+          const oldRow = play.closest('[role="row"]');
+          oldRow.id = "fixture-original-row";
+          const nextRow = document.createElement("div");
+          nextRow.id = "fixture-reparented-row";
+          nextRow.setAttribute("role", "row");
+          nextRow.dataset.uri = "spotify:track:reparented";
+          nextRow.append(play);
+          tracks.append(nextRow);
+        },
+        disableSelectedSidebar() { document.querySelector("nav .spotify-vim-selected-play").setAttribute("aria-disabled", "true"); },
+        disableSelectedMenuItem() {
+          document.querySelector('[role="menu"] .spotify-vim-selected-play').setAttribute("aria-disabled", "true");
+        },
+        removeSelectedMenuItem() {
+          const item = document.querySelector('[role="menu"] .spotify-vim-selected-play');
+          window.fixtureSafety.lastRemovedMenuItem = item;
+          item.remove();
+        },
+        hideSelectedMenuItem() { document.querySelector('[role="menu"] .spotify-vim-selected-play').setAttribute("aria-hidden", "true"); },
+        inertSelectedMenuItem() { document.querySelector('[role="menu"] .spotify-vim-selected-play').setAttribute("inert", ""); },
+        wrapSelectedMenuItem(kind) {
+          const item = document.querySelector('[role="menu"] .spotify-vim-selected-play');
+          const wrapper = document.createElement("div");
+          if (kind === "inert") wrapper.setAttribute("inert", "");
+          else wrapper.setAttribute("aria-hidden", "true");
+          item.replaceWith(wrapper);
+          wrapper.append(item);
+        },
+        changeSelectedMenuId() {
+          document.querySelector('[role="menu"] .spotify-vim-selected-play').id = "fixture-native-changed-id";
+        },
+        setNativeMenuTakeover() {
+          const menu = document.querySelector('[role="menu"]');
+          const a = menu.querySelector('.spotify-vim-selected-play');
+          a.addEventListener("click", () => { document.body.dataset.menuAClicks = String(Number(document.body.dataset.menuAClicks || 0) + 1); });
+          const b = menuItem("Native B", () => { document.body.dataset.menuBClicks = String(Number(document.body.dataset.menuBClicks || 0) + 1); });
+          b.id = "fixture-native-b";
+          b.addEventListener("click", () => { document.body.dataset.menuBClicks = String(Number(document.body.dataset.menuBClicks || 0) + 1); });
+          menu.append(b);
+          menu.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" && menu.getAttribute("aria-activedescendant") === "fixture-native-b") b.click();
+          });
+          menu.setAttribute("aria-activedescendant", "fixture-native-b");
+          menu.focus();
+        },
+        renderDuplicateRows() {
+          tracks.replaceChildren(...["uno", "dos"].map((label, index) => {
+            const row = document.createElement("div");
+            row.setAttribute("role", "row");
+            row.dataset.uri = "spotify:track:duplicate";
+            row.innerHTML = `<button data-testid="play-button" aria-label="Reproducir Duplicado ${index + 1}"></button><button data-testid="more-button" aria-haspopup="menu">Acciones</button>`;
+            row.querySelector('[data-testid="more-button"]').addEventListener("click", toggleMenu);
+            return row;
+          }));
+        },
+        renderUnsafePlayableRows() {
+          tracks.replaceChildren();
+          const unsafe = document.createElement("div");
+          unsafe.setAttribute("role", "row");
+          unsafe.dataset.uri = "spotify:track:unsafe";
+          unsafe.innerHTML = '<div role="gridcell"></div><div role="gridcell"><button id="unsafe-more" aria-haspopup="menu">Más</button><button>Eliminar</button></div>';
+          unsafe.querySelector("#unsafe-more").addEventListener("click", () => { document.body.dataset.unsafeMore = "true"; });
+          const valid = document.createElement("div");
+          valid.setAttribute("role", "row");
+          valid.dataset.uri = "spotify:track:valid";
+          valid.innerHTML = '<div role="gridcell"><button id="valid-first-play" aria-label="Reproducir Válido"></button></div><div role="gridcell"><button aria-haspopup="menu">Más</button></div>';
+          valid.querySelector("#valid-first-play").addEventListener("click", () => { document.body.dataset.validPlayClicks = String(Number(document.body.dataset.validPlayClicks || 0) + 1); });
+          tracks.append(unsafe, valid);
+        },
+        renderWrappedPlayableRows() {
+          tracks.replaceChildren();
+          const unsafe = document.createElement("div");
+          unsafe.setAttribute("role", "row");
+          unsafe.innerHTML = '<div role="presentation"><div role="gridcell"></div><div role="gridcell"><button id="wrapped-unsafe-more" aria-haspopup="menu">Más</button></div></div>';
+          unsafe.querySelector("#wrapped-unsafe-more").addEventListener("click", () => { document.body.dataset.wrappedUnsafeMore = "true"; });
+          const valid = document.createElement("div");
+          valid.setAttribute("role", "row");
+          valid.innerHTML = '<div role="presentation"><div role="gridcell"><button id="wrapped-first-play" aria-label="Reproducir Envuelto"></button></div><div role="gridcell"><button aria-haspopup="menu">Más</button></div></div>';
+          valid.querySelector("#wrapped-first-play").addEventListener("click", () => { document.body.dataset.wrappedPlayClicks = String(Number(document.body.dataset.wrappedPlayClicks || 0) + 1); });
+          tracks.append(unsafe, valid);
+        },
+        focusExternalMenuItem() {
+          const menu = document.querySelector('[role="menu"]');
+          const item = menuItem("Acción nativa", () => {
+            document.body.dataset.nativeMenuActions = String(Number(document.body.dataset.nativeMenuActions || 0) + 1);
+          });
+          item.id = "fixture-native-menu-item";
+          item.addEventListener("click", () => {
+            document.body.dataset.nativeMenuClicks = String(Number(document.body.dataset.nativeMenuClicks || 0) + 1);
+          });
+          item.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+              document.body.dataset.nativeMenuKeydowns = String(Number(document.body.dataset.nativeMenuKeydowns || 0) + 1);
+              item.click();
+            }
+          });
+          menu.append(item);
+          item.focus();
+        },
+        focusOutsideMenu() {
+          const control = document.querySelector("#native-control");
+          control.onkeydown = (event) => {
+            if (event.key === "Enter") {
+              document.body.dataset.externalEnter = "true";
+              document.body.dataset.externalDefaultPrevented = String(event.defaultPrevented);
+            }
+            if (event.key === "h" || event.key === "l") {
+              document.body.dataset.externalPaneKey = event.key;
+              document.body.dataset.externalPaneDefaultPrevented = String(event.defaultPrevented);
+            }
+          };
+          control.onclick = () => { document.body.dataset.externalClick = "true"; };
+          control.focus();
+        },
+        focusOtherMenu() {
+          focusFixtureOtherMenu();
+        },
+        createUnrelatedMenu() { createFixtureUnrelatedMenu(); },
+        focusUnrelatedMenu() { document.querySelector("#fixture-unrelated-menu-item").focus(); },
+        focusComposite() {
+          const control = document.createElement("div");
+          control.id = "fixture-composite";
+          control.setAttribute("role", "slider");
+          control.tabIndex = 0;
+          control.addEventListener("keydown", (event) => {
+            if (event.key === "h" || event.key === "l") {
+              document.body.dataset.compositeKey = event.key;
+              document.body.dataset.compositeDefaultPrevented = String(event.defaultPrevented);
+            }
+          });
+          document.body.append(control);
+          control.focus();
+        },
+        showDialog: showFixtureDialog,
+        setMenuGate() { document.body.dataset.menuGate = "true"; },
+        setMenuShell() {
+          document.body.dataset.menuShell = "true";
+          document.body.dataset.menuItemsGate = "true";
+        },
+        releaseMenuShellItems() { releaseFixtureGate("menuItems"); },
+        setMenuAutoFocusFirst() { document.body.dataset.menuAutoFocusFirst = "true"; },
+        setMenuAutoFocusInput() { document.body.dataset.menuAutoFocusInput = "true"; },
+        setMenuContainerThenInput() { document.body.dataset.menuContainerThenInput = "true"; },
+        setMenuReplacement() { document.body.dataset.menuReplacement = "true"; },
+        retainExistingMenus() {
+          document.body.dataset.allowOpenWithExisting = "true";
+          document.body.dataset.retainExistingMenus = "true";
+        },
+        releaseMenu() { releaseFixtureGate("menu"); },
+        setSubmenuGate() {
+          document.body.dataset.submenuGate = "true";
+        },
+        setSubmenuSameContainer() { document.body.dataset.submenuSameContainer = "true"; },
+        setSubmenuSameUnchanged() { document.body.dataset.submenuSameUnchanged = "true"; },
+        setSubmenuSameRepurposed() { document.body.dataset.submenuSameRepurposed = "true"; },
+        setSubmenuAriaMutation() { document.body.dataset.submenuAriaMutation = "true"; },
+        setSubmenuTextMutation() { document.body.dataset.submenuTextMutation = "true"; },
+        setSubmenuDisabledFalse() { document.body.dataset.submenuDisabledFalse = "true"; },
+        setSubmenuSearchOnly() { document.body.dataset.submenuSearchOnly = "true"; },
+        setSubmenuNativeTakeover() {
+          const menu = document.querySelector('[role="menu"]');
+          const items = [...menu.querySelectorAll(':scope > [role="menuitem"]')];
+          const nativeB = items[0];
+          nativeB.id = "fixture-native-submenu-b";
+          nativeB.addEventListener("click", () => {
+            document.body.dataset.submenuNativeBClicks = String(Number(document.body.dataset.submenuNativeBClicks || 0) + 1);
+          });
+          menu.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" && menu.getAttribute("aria-activedescendant") === nativeB.id) {
+              document.body.dataset.submenuNativeDefaultPrevented = String(event.defaultPrevented);
+              nativeB.click();
+            }
+          });
+          menu.setAttribute("aria-activedescendant", nativeB.id);
+          menu.focus();
+        },
+        suppressSubmenuFocusOpening() { document.body.dataset.submenuFocusOpens = "false"; },
+        restoreSubmenuFocusOpening() { delete document.body.dataset.submenuFocusOpens; },
+        focusSubmenuTrigger() {
+          document.querySelector('[role="menuitem"][aria-expanded]').focus();
+        },
+        releaseSubmenu() { releaseFixtureGate("submenu"); },
+        runPendingMenuRace(kind) {
+          document.body.dataset.menuGate = "true";
+          dispatchFixtureKey(kind === "neutral" ? "A" : "a", kind === "neutral" ? { shiftKey: true } : {});
+          if (document.body.dataset.menuPending !== "true") throw new Error("menu gate did not start");
+          if (kind === "disable") dispatchFixtureKey("v", { altKey: true, shiftKey: true });
+          else if (kind === "search") dispatchFixtureKey("/");
+          else dispatchFixtureKey("Escape");
+          releaseFixtureGate("menu");
+          document.body.dataset.menuRace = kind;
+        },
+        runCloseRace(stage) {
+          document.body.dataset.ignoreMenuEscape = "true";
+          if (stage === "second") {
+            document.body.dataset.stubbornMenu = "true";
+            document.body.dataset.closeFocusOnMore = "true";
+          }
+          dispatchFixtureKey("h");
+          if (stage === "first") focusFixtureOtherMenu();
+        },
+        runPostActionJ() {
+          dispatchFixtureKey("l");
+          dispatchFixtureKey("j");
+        },
+        setActionMode(mode) { document.body.dataset.actionMode = mode; },
+        armHelpHostHandlers() {
+          document.addEventListener("keydown", (event) => {
+            if (["?", "j", "k", "a", "l", "h", "Tab", "ArrowDown", "PageDown", "Enter", " "].includes(event.key)) {
+              document.body.dataset.helpHostKeys = String(Number(document.body.dataset.helpHostKeys || 0) + 1);
+            }
+          });
+        },
+        setPreexistingMenuAria() { document.body.dataset.preexistingMenuAria = "true"; },
+        setThirdNativeMenuRef() {
+          const menu = document.querySelector('[role="menu"]');
+          const ref = document.createElement("span");
+          ref.id = "fixture-third-active";
+          ref.textContent = "Native active reference";
+          menu.append(ref);
+          menu.setAttribute("aria-activedescendant", "fixture-third-active");
+        },
+        addGeneratedIdCollision() {
+          const collision = document.createElement("span");
+          collision.id = "spotify-vim-menu-item-1";
+          document.body.append(collision);
+        },
+        recordRemovedMenuAria() {
+          new MutationObserver((records) => records.flatMap((record) => [...record.removedNodes])
+            .filter((node) => node instanceof HTMLElement && node.getAttribute("role") === "menu")
+            .forEach((menu) => {
+              document.body.dataset.removedMenuAria = menu.getAttribute("aria-activedescendant") || "";
+              document.body.dataset.removedMenuItemId = menu.querySelector('[role="menuitem"]')?.id || "";
+            })).observe(document.body, { childList: true });
+        },
+        clearActionMode() { delete document.body.dataset.actionMode; },
+        addSiblingPlaylistSearch() {
+          const input = document.createElement("input");
+          input.id = "fixture-sibling-playlist-search";
+          input.setAttribute("role", "searchbox");
+          input.setAttribute("aria-label", "Buscar lista");
+          document.body.append(input);
+        },
+        addExternalInput() {
+          const input = document.createElement("input");
+          input.id = "fixture-external-input";
+          input.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") document.body.dataset.externalEscapePrevented = String(event.defaultPrevented);
+          });
+          document.body.append(input);
+          input.focus();
+        },
+        armSubmenuActivation() {
+          const item = document.querySelector('[role="menuitem"][aria-expanded]');
+          item.addEventListener("click", () => {
+            document.body.dataset.submenuClicks = String(Number(document.body.dataset.submenuClicks || 0) + 1);
+          });
+          item.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === "l") {
+              document.body.dataset.submenuKeydowns = String(Number(document.body.dataset.submenuKeydowns || 0) + 1);
+              item.click();
+            }
+          });
+        },
+        countSidebarActivation() {
+          const item = document.querySelector('[role="gridcell"] [role="button"]');
+          item.addEventListener("click", () => { document.body.dataset.sidebarClicks = String(Number(document.body.dataset.sidebarClicks || 0) + 1); });
+          item.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") document.body.dataset.sidebarKeydowns = String(Number(document.body.dataset.sidebarKeydowns || 0) + 1);
+          });
+        }
+      };
       document.querySelectorAll('[role="gridcell"] [role="button"]').forEach((item) => {
         item.addEventListener("click", () => document.querySelector("#library-control").focus());
       });

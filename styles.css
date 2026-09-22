@@ -6,11 +6,16 @@
   border-radius: 999px !important;
 }
 
+.spotify-vim-selected-context {
+  background: rgba(231, 181, 107, 0.08) !important;
+  box-shadow: inset 3px 0 0 #e7b56b !important;
+}
+
 #spotify-vim-navigation-status {
   position: fixed;
   z-index: 2147483647;
   right: 18px;
-  bottom: 105px;
+  top: max(18px, env(safe-area-inset-top));
   max-width: min(520px, calc(100vw - 36px));
   padding: 8px 12px;
   border: 1px solid #e7b56b;
@@ -28,8 +33,105 @@
   opacity: 1;
 }
 
+#spotify-vim-navigation-status[data-suppressed="true"] {
+  opacity: 0 !important;
+}
+
+#spotify-vim-navigation-help {
+  --spotify-vim-help-top: max(64px, calc(env(safe-area-inset-top) + 46px));
+  position: fixed;
+  z-index: 2147483646;
+  top: var(--spotify-vim-help-top);
+  right: 18px;
+  width: min(560px, calc(100vw - 36px));
+  max-height: min(720px, calc(100vh - var(--spotify-vim-help-top) - max(18px, env(safe-area-inset-bottom)) - 18px));
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 18px;
+  border: 1px solid #e7b56b;
+  border-radius: 10px;
+  background: rgba(20, 15, 10, 0.98);
+  color: #f7e6ca;
+  font: 14px system-ui, sans-serif;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+
+@supports (height: 100dvh) {
+  #spotify-vim-navigation-help {
+    max-height: min(720px, calc(100dvh - var(--spotify-vim-help-top) - max(18px, env(safe-area-inset-bottom)) - 18px));
+  }
+}
+
+.spotify-vim-help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.spotify-vim-help-header h2,
+.spotify-vim-help-groups h3 {
+  margin: 0;
+  color: #fff3df;
+}
+
+.spotify-vim-help-header h2 { font-size: 18px; }
+.spotify-vim-help-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.spotify-vim-help-groups h3 { margin-bottom: 7px; font-size: 13px; }
+.spotify-vim-help-groups dl { margin: 0; }
+.spotify-vim-help-groups dl > div {
+  display: grid;
+  grid-template-columns: minmax(92px, auto) 1fr;
+  gap: 8px;
+  align-items: baseline;
+  margin: 6px 0;
+}
+.spotify-vim-help-groups dt { color: #fff3df; font-weight: 600; }
+.spotify-vim-help-groups dd { margin: 0; color: #f7e6ca; }
+#spotify-vim-navigation-help kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid #b88b54;
+  border-radius: 4px;
+  background: #302116;
+  color: #fff3df;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+#spotify-vim-navigation-help button {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid #e7b56b;
+  border-radius: 5px;
+  background: #302116;
+  color: #fff3df;
+  cursor: pointer;
+}
+#spotify-vim-navigation-help button:focus-visible {
+  outline: 2px solid #fff3df;
+  outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   #spotify-vim-navigation-status {
     transition: none;
   }
+}
+
+@media (max-width: 620px) {
+  #spotify-vim-navigation-status,
+  #spotify-vim-navigation-help {
+    right: max(10px, env(safe-area-inset-right));
+    left: max(10px, env(safe-area-inset-left));
+    width: auto;
+    max-width: none;
+  }
+  #spotify-vim-navigation-help {
+    --spotify-vim-help-top: max(56px, calc(env(safe-area-inset-top) + 40px));
+  }
+  .spotify-vim-help-groups { grid-template-columns: 1fr; gap: 12px; }
 }

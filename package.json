@@ -6,7 +6,7 @@
   "scripts": {
     "test": "npm run test:static && npm run test:browser",
     "test:static": "node scripts/validate.mjs",
-    "test:browser": "tests/browser-smoke.sh",
+    "test:browser": "tests/browser-smoke.sh && tests/browser-safety.sh",
     "test:live": "tests/live-public-smoke.sh",
     "package": "scripts/package.sh"
   }

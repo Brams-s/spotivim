@@ -17,8 +17,12 @@ trap cleanup EXIT
 "${browser[@]}" press l >/dev/null
 "${browser[@]}" wait --fn 'Boolean(document.querySelector("#spotify-vim-navigation-status")?.dataset.extensionVersion)' >/dev/null
 "${browser[@]}" wait --fn 'document.querySelector(".spotify-vim-selected-play")?.getAttribute("aria-label") === "Reproducir Uno"' >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("main [data-uri=\"spotify:track:uno\"]")?.classList.contains("spotify-vim-selected-context")' >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("#spotify-vim-navigation-status")?.textContent.includes("Press ? for shortcuts")' >/dev/null
 "${browser[@]}" press j >/dev/null
 "${browser[@]}" wait --fn 'document.querySelector(".spotify-vim-selected-play")?.getAttribute("aria-label") === "Reproducir Dos"' >/dev/null
+"${browser[@]}" wait --fn '!document.querySelector("main [data-uri=\"spotify:track:uno\"]")?.classList.contains("spotify-vim-selected-context")' >/dev/null
+"${browser[@]}" wait --fn '!document.querySelector("#spotify-vim-navigation-status")?.textContent.includes("Press ? for shortcuts")' >/dev/null
 
 "${browser[@]}" eval 'window.replaceTracks()' >/dev/null
 "${browser[@]}" press j >/dev/null
@@ -29,10 +33,49 @@ trap cleanup EXIT
 for _ in {1..3}; do
   "${browser[@]}" press a >/dev/null
   "${browser[@]}" wait --fn 'document.activeElement?.getAttribute("role") === "menu"' >/dev/null
+  "${browser[@]}" wait --fn 'document.activeElement.getAttribute("aria-activedescendant") === document.querySelector("[role=menu] .spotify-vim-selected-play")?.id && Boolean(document.querySelector("[role=menu] .spotify-vim-selected-play")?.id)' >/dev/null
   "${browser[@]}" press Escape >/dev/null
   "${browser[@]}" wait --fn 'document.querySelectorAll("[role=menu]").length === 0' >/dev/null
   "${browser[@]}" wait --fn 'document.querySelector(".spotify-vim-selected-play")?.getAttribute("aria-label") === "Reproducir Cuatro"' >/dev/null
 done
+
+# The help surface owns its keys, toggles without duplication, and restores
+# the selected control when dismissed.
+"${browser[@]}" eval 'window.fixtureSafety.armHelpHostHandlers()' >/dev/null
+"${browser[@]}" eval 'document.body.dataset.statusBeforeHelp = document.querySelector("#spotify-vim-navigation-status")?.textContent || ""' >/dev/null
+"${browser[@]}" set viewport 420 480 >/dev/null
+"${browser[@]}" press '?' >/dev/null
+"${browser[@]}" wait --fn 'document.querySelectorAll("#spotify-vim-navigation-help").length === 1 && document.querySelector("#spotify-vim-navigation-help [data-spotify-vim-help-close]") === document.activeElement' >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("#spotify-vim-navigation-status")?.textContent === document.body.dataset.statusBeforeHelp && document.querySelector("#spotify-vim-navigation-status")?.dataset.suppressed === "true" && !document.querySelector("#spotify-vim-navigation-status")?.textContent.includes("j/k move")' >/dev/null
+"${browser[@]}" eval 'document.querySelector("#spotify-vim-navigation-help").scrollTop = 0' >/dev/null
+"${browser[@]}" press PageDown >/dev/null
+"${browser[@]}" press ArrowDown >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("#spotify-vim-navigation-help").scrollTop > 0 && !document.body.dataset.helpHostKeys' >/dev/null
+"${browser[@]}" press j >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector(".spotify-vim-selected-play")?.getAttribute("aria-label") === "Reproducir Cuatro" && document.querySelector("#spotify-vim-navigation-help [data-spotify-vim-help-close]") === document.activeElement && !document.body.dataset.helpHostKeys' >/dev/null
+"${browser[@]}" press Tab >/dev/null
+"${browser[@]}" press Shift+Tab >/dev/null
+"${browser[@]}" press Escape >/dev/null
+"${browser[@]}" wait --fn '!document.querySelector("#spotify-vim-navigation-help") && document.querySelector(".spotify-vim-selected-play") === document.activeElement' >/dev/null
+"${browser[@]}" press j >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("#spotify-vim-navigation-status")?.dataset.suppressed === "false" && document.querySelector("#spotify-vim-navigation-status")?.dataset.visible === "true"' >/dev/null
+"${browser[@]}" press '?' >/dev/null
+"${browser[@]}" press Enter >/dev/null
+"${browser[@]}" wait --fn '!document.querySelector("#spotify-vim-navigation-help")' >/dev/null
+"${browser[@]}" press '?' >/dev/null
+"${browser[@]}" press Space >/dev/null
+"${browser[@]}" wait --fn '!document.querySelector("#spotify-vim-navigation-help")' >/dev/null
+"${browser[@]}" press '?' >/dev/null
+"${browser[@]}" press Alt+Shift+v >/dev/null
+"${browser[@]}" wait --fn '!document.querySelector("#spotify-vim-navigation-help") && !document.querySelector(".spotify-vim-selected-play") && document.querySelector("#spotify-vim-navigation-status")?.textContent.includes("disabled")' >/dev/null
+"${browser[@]}" press Alt+Shift+v >/dev/null
+"${browser[@]}" press '?' >/dev/null
+"${browser[@]}" eval 'window.fixtureSafety.addExternalInput()' >/dev/null
+"${browser[@]}" press Alt+Shift+v >/dev/null
+"${browser[@]}" wait --fn 'document.activeElement?.id === "fixture-external-input" && !document.querySelector("#spotify-vim-navigation-help") && !document.querySelector(".spotify-vim-selected-play")' >/dev/null
+"${browser[@]}" press Alt+Shift+v >/dev/null
+"${browser[@]}" eval 'document.activeElement.blur()' >/dev/null
+"${browser[@]}" set viewport 1280 800 >/dev/null
 
 # Shift+A opens the now-playing widget's menu instead of the selected row's
 # menu, and returns to the existing selection when dismissed.
@@ -41,10 +84,13 @@ done
 "${browser[@]}" wait --fn 'document.querySelector("[role=menu] .spotify-vim-selected-play")?.textContent === "Agregar a la cola"' >/dev/null
 "${browser[@]}" press Escape >/dev/null
 "${browser[@]}" wait --fn 'document.querySelectorAll("[role=menu]").length === 0' >/dev/null
-"${browser[@]}" wait --fn 'document.querySelector(".spotify-vim-selected-play")?.getAttribute("aria-label") === "Reproducir Cuatro"' >/dev/null
+"${browser[@]}" wait --fn '!document.querySelector(".spotify-vim-selected-play")' >/dev/null
 
 # A playlist query with no matches must still let Escape return navigation to
 # the menu, and a second Escape must close the entire action stack.
+"${browser[@]}" press l >/dev/null
+"${browser[@]}" press j >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector(".spotify-vim-selected-play")?.getAttribute("aria-label") === "Reproducir Cuatro"' >/dev/null
 "${browser[@]}" press a >/dev/null
 "${browser[@]}" wait --fn 'document.activeElement?.getAttribute("role") === "menu"' >/dev/null
 "${browser[@]}" press k >/dev/null

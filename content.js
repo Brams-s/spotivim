@@ -5,7 +5,10 @@
   globalThis.__spotifyVimNavigationInstalled = true;
 
   const selectedClass = "spotify-vim-selected-play";
+  const selectedContextClass = "spotify-vim-selected-context";
   const statusId = "spotify-vim-navigation-status";
+  const helpId = "spotify-vim-navigation-help";
+  const helpHeadingId = "spotify-vim-navigation-help-heading";
   let selected = null;
   let pane = "main";
   let lastMainSelection = null;
@@ -13,6 +16,7 @@
   let lastSidebarSelection = null;
   let lastSidebarIdentity = null;
   let lastMenuSelection = null;
+  let lastMenuIdentity = null;
   let menuOriginPane = "main";
   let menuOriginSelection = null;
   let menuOriginActionTarget = null;
@@ -21,6 +25,20 @@
   let pendingGTimer = 0;
   let statusTimer = 0;
   let enabled = true;
+  let operationGeneration = 0;
+  let currentOperation = null;
+  let staleSidebarFocus = null;
+  let staleSidebarTimer = 0;
+  let ownedMenuSearch = null;
+  let menuAriaState = new WeakMap();
+  let activeMenuAriaState = null;
+  let menuAriaReconcileTimer = 0;
+  let menuItemId = 0;
+  let helpRestoreFocus = null;
+  let firstSelectionHintShown = false;
+  let selectedContextOwner = null;
+  let selectedContextOwnerClass = null;
+  let suppressedStatusMessage = null;
 
   function extensionVersion() {
     try {
@@ -55,8 +73,14 @@
     // grid rows omit that marker, but consistently place the play control in
     // the first role=gridcell. Keep the old selector as a compatibility path.
     return [...main.querySelectorAll('[role="row"]')]
-      .map((row) => row.querySelector('button[data-testid="play-button"]') ||
-        row.querySelector('[role="gridcell"] button'))
+      .map((row) => {
+        const explicit = row.querySelector('button[data-testid="play-button"]');
+        if (explicit) return explicit;
+        // Current Spotify wraps track cells in a presentation div. Search the
+        // first gridcell in DOM order, never a later action cell.
+        const firstCell = row.querySelector('[role="gridcell"]');
+        return firstCell?.querySelector("button") || null;
+      })
       .filter(visible);
   }
 
@@ -107,6 +131,20 @@
       .filter(visible);
   }
 
+  function localActionMenuSearch(menu) {
+    if (!(menu instanceof HTMLElement)) return null;
+    const selector = [
+      'input[role="searchbox"]', 'input[type="search"]', '[role="searchbox"]',
+      '[data-testid="playlist-search-input"]', 'input[placeholder*="playlist" i]',
+      'input[aria-label*="playlist" i]'
+    ].join(", ");
+    return [...menu.querySelectorAll(selector)].find(visible) || null;
+  }
+
+  function menuIsReady(menu) {
+    return actionMenuItems(menu).length > 0 || localActionMenuSearch(menu) instanceof HTMLElement;
+  }
+
   function focusActionMenu(menu) {
     if (!(menu instanceof HTMLElement)) return;
     if (!menu.hasAttribute("tabindex")) menu.setAttribute("tabindex", "-1");
@@ -119,8 +157,7 @@
       '[data-testid="playlist-search-input"]', 'input[placeholder*="playlist" i]',
       'input[aria-label*="playlist" i]'
     ].join(", ");
-    const local = menu instanceof HTMLElement ? [...menu.querySelectorAll(selector)] : [];
-    const localSearch = local.find(visible);
+    const localSearch = localActionMenuSearch(menu);
     if (localSearch) return localSearch;
 
     // Some Spotify experiments render the playlist picker in a sibling portal
@@ -143,6 +180,7 @@
     }
     clearSelection();
     pane = "menu";
+    ownedMenuSearch = { menu, search };
     search.focus({ preventScroll: true });
     if (search instanceof HTMLInputElement) search.select();
     flash("Playlist search — type, then Esc to return to the results.");
@@ -169,11 +207,229 @@
     clearTimeout(statusTimer);
     status.textContent = message;
     status.dataset.visible = "true";
+    const helpOpen = document.getElementById(helpId);
+    status.dataset.suppressed = helpOpen ? "true" : "false";
+    if (helpOpen) suppressedStatusMessage = message;
     statusTimer = setTimeout(() => { status.dataset.visible = "false"; }, duration);
+  }
+
+  function selectionContextOwner(element, selectionPane) {
+    if (!(element instanceof Element)) return null;
+    if (selectionPane === "menu") return element;
+    if (selectionPane === "sidebar") return element.closest('[role="gridcell"]');
+    return element.closest('[role="row"]');
+  }
+
+  function clearSelectionContextOwner() {
+    if (selectedContextOwner instanceof HTMLElement && selectedContextOwnerClass) {
+      selectedContextOwner.classList.remove(selectedContextOwnerClass);
+    }
+    selectedContextOwner = null;
+    selectedContextOwnerClass = null;
+  }
+
+  function cleanupMenuAriaState(state = activeMenuAriaState) {
+    if (!state) return;
+    const menu = state.menu;
+    const current = menu instanceof HTMLElement ? menu.getAttribute("aria-activedescendant") : null;
+    // Spotify may have taken ownership since our last update. Never overwrite
+    // that newer value while releasing our own reference.
+    if (menu instanceof HTMLElement && current === state.extensionValue) {
+      if (state.hadAttribute) menu.setAttribute("aria-activedescendant", state.previousValue);
+      else menu.removeAttribute("aria-activedescendant");
+    }
+    if (state.generatedId && state.targetItem?.id === state.extensionValue) {
+      state.targetItem.removeAttribute("id");
+    }
+    if (menu instanceof HTMLElement) menuAriaState.delete(menu);
+    state.observer?.disconnect();
+    if (activeMenuAriaState === state) activeMenuAriaState = null;
+    if (!activeMenuAriaState && menuAriaReconcileTimer) {
+      clearInterval(menuAriaReconcileTimer);
+      menuAriaReconcileTimer = 0;
+    }
+  }
+
+  function menuTargetEligible(state) {
+    if (!state || !(state.menu instanceof HTMLElement) || !(state.targetItem instanceof HTMLElement)) return false;
+    const target = state.targetItem;
+    return target.isConnected && target.id === state.extensionValue &&
+      !unavailableNativeContext(target) && target.getAttribute("aria-disabled") !== "true" &&
+      target.getAttribute("aria-hidden") !== "true" && !target.hasAttribute("inert") &&
+      actionMenuItems(state.menu).includes(target);
+  }
+
+  function menuOwnershipIntact(menu = menuForSelection()) {
+    const state = activeMenuAriaState;
+    return state && state.menu === menu && menuTargetEligible(state) &&
+      menu.getAttribute("aria-activedescendant") === state.extensionValue;
+  }
+
+  function relinquishMenuSelection() {
+    const old = selected;
+    if (activeMenuAriaState) cleanupMenuAriaState();
+    old?.classList.remove(selectedClass);
+    clearSelectionContextOwner();
+    selected = null;
+    lastMenuSelection = null;
+    lastMenuIdentity = null;
+    supersedeOperations();
+  }
+
+  function reconcileMenuAria() {
+    const state = activeMenuAriaState;
+    if (!state) return;
+    const relationshipIntact = state.menu.getAttribute("aria-activedescendant") === state.extensionValue;
+    if (!relationshipIntact || !menuTargetEligible(state)) {
+      const nativeTakeover = !relationshipIntact;
+      const ownsPendingOperation = nativeTakeover && currentOperation?.menu === state.menu;
+      if (ownsPendingOperation) {
+        relinquishMenuSelection();
+        return;
+      }
+      cleanupMenuAriaState(state);
+      if (selected === state.targetItem) {
+        selected?.classList.remove(selectedClass);
+        selected = null;
+        clearSelectionContextOwner();
+        lastMenuSelection = null;
+        lastMenuIdentity = null;
+      }
+    }
+  }
+
+  function restoreMenuActiveDescendant(menu) {
+    const state = menuAriaState.get(menu);
+    if (state) cleanupMenuAriaState(state);
+  }
+
+  function ownedMenuItemId(item) {
+    if (item.id) return item.id;
+    let id;
+    do {
+      menuItemId += 1;
+      id = `spotify-vim-menu-item-${menuItemId}`;
+    } while (document.getElementById(id));
+    item.id = id;
+    return id;
+  }
+
+  function updateMenuActiveDescendant(item) {
+    const menu = item?.closest?.('[role="menu"]');
+    if (!(menu instanceof HTMLElement) || !(item instanceof HTMLElement)) return;
+    let state = menuAriaState.get(menu);
+    if (!state) {
+      state = {
+        menu,
+        hadAttribute: menu.hasAttribute("aria-activedescendant"),
+        previousValue: menu.getAttribute("aria-activedescendant") || "",
+        targetItem: null,
+        extensionValue: null,
+        generatedId: false
+      };
+      menuAriaState.set(menu, state);
+      activeMenuAriaState = state;
+      if (!menuAriaReconcileTimer) menuAriaReconcileTimer = setInterval(reconcileMenuAria, 150);
+      state.observer = new MutationObserver(() => reconcileMenuAria());
+      // The menu can be reparented or its selected child can be removed from
+      // the portal without mutating the menu node itself. This observer is
+      // active only while this one extension-owned reference exists and is
+      // disconnected by cleanupMenuAriaState.
+      state.observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["id", "aria-activedescendant", "aria-disabled", "aria-hidden", "hidden", "inert", "style", "class", "role"]
+      });
+    }
+    if (state.targetItem && state.targetItem !== item && state.generatedId && state.targetItem.id === state.extensionValue) {
+      state.targetItem.removeAttribute("id");
+    }
+    const hadItemId = Boolean(item.id);
+    const id = ownedMenuItemId(item);
+    state.targetItem = item;
+    state.extensionValue = id;
+    state.generatedId = !hadItemId;
+    menu.setAttribute("aria-activedescendant", id);
+  }
+
+  function clearHelpRestoreFocus() {
+    const focus = helpRestoreFocus;
+    helpRestoreFocus = null;
+    if (focus instanceof HTMLElement && focus.isConnected && visible(focus) && !unavailableNativeContext(focus)) {
+      focus.focus({ preventScroll: true });
+    }
+  }
+
+  function closeHelp(restore = true) {
+    const panel = document.getElementById(helpId);
+    const ownsFocus = panel instanceof HTMLElement &&
+      (document.activeElement === panel || panel.contains(document.activeElement));
+    if (panel) panel.remove();
+    const status = document.getElementById(statusId);
+    if (status) {
+      if (suppressedStatusMessage !== null && status.textContent === suppressedStatusMessage) {
+        status.dataset.visible = "false";
+      }
+      status.dataset.suppressed = "false";
+    }
+    suppressedStatusMessage = null;
+    if (restore && ownsFocus) clearHelpRestoreFocus();
+    else helpRestoreFocus = null;
+  }
+
+  function openHelp() {
+    if (document.getElementById(helpId)) {
+      closeHelp();
+      return;
+    }
+    ensureUi();
+    const status = document.getElementById(statusId);
+    status?.setAttribute("data-suppressed", "true");
+    suppressedStatusMessage = status?.textContent || null;
+    helpRestoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const panel = document.createElement("section");
+    panel.id = helpId;
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "false");
+    panel.setAttribute("aria-labelledby", helpHeadingId);
+    panel.tabIndex = -1;
+    panel.innerHTML = `
+      <div class="spotify-vim-help-header"><h2 id="${helpHeadingId}">Keyboard shortcuts</h2>
+        <button type="button" data-spotify-vim-help-close>Close</button></div>
+      <div class="spotify-vim-help-groups">
+        <section><h3>Navigation</h3><dl>
+          <div><dt><kbd>h</kbd> / <kbd>l</kbd></dt><dd>Choose the library or main pane</dd></div>
+          <div><dt><kbd>j</kbd> / <kbd>k</kbd></dt><dd>Move the selection</dd></div>
+          <div><dt><kbd>Enter</kbd></dt><dd>Open the selected library item</dd></div>
+          <div><dt><kbd>/</kbd></dt><dd>Focus Spotify search</dd></div>
+        </dl></section>
+        <section><h3>Actions</h3><dl>
+          <div><dt><kbd>a</kbd></dt><dd>Open actions for the selection</dd></div>
+          <div><dt><kbd>Shift</kbd> + <kbd>A</kbd></dt><dd>Open actions for what is playing</dd></div>
+        </dl></section>
+        <section><h3>Menus</h3><dl>
+          <div><dt><kbd>j</kbd> / <kbd>k</kbd></dt><dd>Move through actions</dd></div>
+          <div><dt><kbd>l</kbd> / <kbd>Enter</kbd></dt><dd>Choose or enter a submenu</dd></div>
+          <div><dt><kbd>/</kbd></dt><dd>Search playlist choices</dd></div>
+          <div><dt><kbd>h</kbd> / <kbd>Esc</kbd></dt><dd>Close and return</dd></div>
+        </dl></section>
+        <section><h3>Global</h3><dl>
+          <div><dt><kbd>gg</kbd> / <kbd>G</kbd></dt><dd>Scroll to the top or bottom</dd></div>
+          <div><dt><kbd>H</kbd> / <kbd>L</kbd></dt><dd>Go back or forward in browser history</dd></div>
+          <div><dt><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>V</kbd></dt><dd>Turn navigation on or off</dd></div>
+          <div><dt><kbd>?</kbd></dt><dd>Show or hide these shortcuts</dd></div>
+        </dl></section>
+      </div>`;
+    panel.querySelector("[data-spotify-vim-help-close]").addEventListener("click", closeHelp);
+    document.body.append(panel);
+    panel.querySelector("[data-spotify-vim-help-close]")?.focus({ preventScroll: true });
   }
 
   function clearSelection() {
     selected?.classList.remove(selectedClass);
+    clearSelectionContextOwner();
+    if (activeMenuAriaState) cleanupMenuAriaState();
     selected = null;
   }
 
@@ -187,8 +443,62 @@
       "a[href]", "button", "input", "textarea", "select",
       "[contenteditable]:not([contenteditable=\"false\"])", "[role=button]",
       "[role=link]", "[role=slider]", "[role=tab]", "[role=combobox]",
-      "[role=listbox]", "[role=dialog]"
+      "[role=listbox]", "[role=dialog]", "[role=menuitem]", "[role=option]",
+      "[role=tree]", "[role=grid]", "[role=treegrid]"
     ].join(", ")));
+  }
+
+  function unavailableNativeContext(element) {
+    if (!(element instanceof Element)) return false;
+    return Boolean(element.closest('[role="dialog"], [role="alertdialog"], dialog[open], [inert], [aria-hidden="true"]'));
+  }
+
+  function menuFocusState(menu = menuForSelection()) {
+    if (!(menu instanceof HTMLElement) || !visible(menu)) return { menu: null, kind: "none", item: null };
+    const focus = document.activeElement;
+    if (focus === menu) return { menu, kind: "container", item: null };
+    if (focus instanceof Element) {
+      const item = focus.closest('[role="menuitem"], [role="option"]');
+      if (item instanceof HTMLElement && actionMenuItems(menu).includes(item)) {
+        return { menu, kind: "item", item };
+      }
+    }
+    return { menu, kind: "none", item: null };
+  }
+
+  function adoptFocusedMenuItem(menu) {
+    const { kind, item } = menuFocusState(menu);
+    if (kind !== "item" || !(item instanceof HTMLElement)) return false;
+    if (selected !== item) {
+      clearSelection();
+      selected = item;
+      pane = "menu";
+      lastMenuSelection = item;
+      lastMenuIdentity = elementIdentity(item);
+      item.classList.add(selectedClass);
+      selectedContextOwner = selectionContextOwner(item, "menu");
+      selectedContextOwnerClass = selectedContextClass;
+      selectedContextOwner?.classList.add(selectedContextClass);
+      updateMenuActiveDescendant(item);
+    }
+    return true;
+  }
+
+  function ownsStaleSidebarFocus() {
+    const focus = document.activeElement;
+    return pane === "sidebar" && selectedIsUsable() &&
+      staleSidebarFocus?.source === selected && staleSidebarFocus.target === focus &&
+      !unavailableNativeContext(focus);
+  }
+
+  function clearStaleSidebarFocus() {
+    staleSidebarFocus = null;
+    clearTimeout(staleSidebarTimer);
+    staleSidebarTimer = 0;
+  }
+
+  function clearOwnedMenuSearch() {
+    ownedMenuSearch = null;
   }
 
   function selectionOwnsEvent(event) {
@@ -199,9 +509,105 @@
   }
 
   function canHandleShortcut(event) {
-    if (pane === "menu" && activeActionMenu()) return true;
+    if (unavailableNativeContext(event.target) || unavailableNativeContext(document.activeElement)) return false;
+    if (pane === "menu" && menuFocusState().kind !== "none") return true;
     if (selectionOwnsEvent(event)) return true;
     return !nativeInteractive(event.target) && !nativeInteractive(document.activeElement);
+  }
+
+  function captureMenuOrigin(target = selected) {
+    return {
+      pane,
+      selection: selected,
+      actionTarget: target,
+      scope: target?.closest?.('[role="row"], [role="gridcell"]') || target?.parentElement || null
+    };
+  }
+
+  function rememberedMenuOrigin() {
+    return {
+      pane: menuOriginPane,
+      selection: menuOriginSelection,
+      actionTarget: menuOriginActionTarget,
+      scope: menuOriginActionTarget?.closest?.('[role="row"], [role="gridcell"]') ||
+        menuOriginActionTarget?.parentElement || null
+    };
+  }
+
+  function supersedeOperations() {
+    if (currentOperation) currentOperation.awaitingMenu = false;
+    operationGeneration += 1;
+    currentOperation = null;
+  }
+
+  function beginOperation(origin = captureMenuOrigin()) {
+    supersedeOperations();
+    const operation = {
+      id: operationGeneration,
+      origin,
+      menu: null,
+      menuItem: null,
+      awaitingMenu: false,
+      allowMenuTransition: false,
+      preOpenMenu: null,
+      preExistingMenus: new Set()
+    };
+    currentOperation = operation;
+    return operation;
+  }
+
+  function operationIsCurrent(operation) {
+    return enabled && currentOperation === operation && operation.id === operationGeneration;
+  }
+
+  function operationAllowsFocus(operation, focus) {
+    if (!(focus instanceof Element)) return true;
+    if (unavailableNativeContext(focus)) return false;
+    const focusMenu = focus.closest('[role="menu"]');
+    if (focusMenu) {
+      // Spotify can focus its first native menuitem in the same task that
+      // mounts the portal, before our waiter continuation records the menu.
+      // Admit only that first active portal while an action-open explicitly
+      // awaits it; every later/replacement menu remains a superseding focus.
+      if (!operation.menu && operation.awaitingMenu &&
+        !operation.preExistingMenus.has(focusMenu) && focusMenu === activeActionMenu()) {
+        const initialItem = focus.closest('[role="menuitem"], [role="option"]');
+        const eligibleItem = initialItem instanceof HTMLElement && actionMenuItems(focusMenu).includes(initialItem)
+          ? initialItem
+          : null;
+        // A portal container or one of its eligible actions is an expected
+        // mount-time handoff. Directly nested controls are native ownership.
+        if (focus !== focusMenu && !eligibleItem) return false;
+        operation.menu = focusMenu;
+        operation.menuItem = eligibleItem;
+      }
+      if (focusMenu !== operation.menu) return false;
+      const item = focus.closest('[role="menuitem"], [role="option"]');
+      return focus === operation.menu || (item instanceof HTMLElement &&
+        operation.menuItem instanceof HTMLElement && item === operation.menuItem);
+    }
+    if (focus === operation.origin.selection || focus === operation.origin.actionTarget) return true;
+    return operation.origin.scope instanceof Element && operation.origin.scope.contains(focus);
+  }
+
+  function restoreIsSafe(operation) {
+    if (!operationIsCurrent(operation) || activeActionMenu()) return false;
+    const focus = document.activeElement;
+    return !nativeInteractive(focus) || operationAllowsFocus(operation, focus);
+  }
+
+  function operationOwnsMenu(operation, menu = activeActionMenu()) {
+    return operationIsCurrent(operation) && menu instanceof HTMLElement && menu === operation.menu;
+  }
+
+  function setOperationMenu(operation, menu, item = null) {
+    if (!operationIsCurrent(operation) || !(menu instanceof HTMLElement)) return false;
+    if (operation.menu && operation.menu !== menu && !operation.allowMenuTransition) return false;
+    operation.menu = menu;
+    operation.menuItem = item;
+    operation.awaitingMenu = false;
+    operation.allowMenuTransition = false;
+    return true;
   }
 
   function reconcilePane() {
@@ -242,9 +648,56 @@
 
   function rememberedIndex(items, element, identity) {
     const connectedIndex = items.indexOf(element);
-    if (connectedIndex >= 0) return connectedIndex;
+    if (connectedIndex >= 0 && (!identity || elementIdentity(element) === identity)) return connectedIndex;
     if (!identity) return -1;
-    return items.findIndex((item) => elementIdentity(item) === identity);
+    const matches = items.filter((item) => elementIdentity(item) === identity);
+    return matches.length === 1 ? items.indexOf(matches[0]) : -1;
+  }
+
+  function eligibleSelectionCandidate(item, items, identity, selectionPane, menu) {
+    return item instanceof HTMLElement && items.includes(item) && visible(item) &&
+      !unavailableNativeContext(item) && item.getAttribute("aria-disabled") !== "true" &&
+      (!identity || elementIdentity(item) === identity) &&
+      (selectionPane !== "menu" || item.closest('[role="menu"]') === menu);
+  }
+
+  function selectionStateForPane(selectionPane = pane) {
+    if (selectionPane === "sidebar") {
+      return { items: sidebarItems(), identity: lastSidebarIdentity, menu: null };
+    }
+    if (selectionPane === "menu") {
+      const menu = menuForSelection();
+      return { items: actionMenuItems(menu), identity: lastMenuIdentity, menu };
+    }
+    return { items: playableButtons(), identity: lastMainIdentity, menu: null };
+  }
+
+  function revalidateCurrentSelection(selectionPane = pane) {
+    const { items, identity, menu } = selectionStateForPane(selectionPane);
+    if (!(selected instanceof HTMLElement)) {
+      flash("Select an item first.");
+      return false;
+    }
+    if (eligibleSelectionCandidate(selected, items, identity, selectionPane, menu)) return true;
+
+    // A connected node whose identity changed was recycled. Never redirect it
+    // to a duplicate match; only a detached selection may be reacquired.
+    if (selected.isConnected) {
+      clearSelection();
+      flash("Selection is no longer available.");
+      return false;
+    }
+
+    const replacements = identity
+      ? items.filter((item) => eligibleSelectionCandidate(item, items, identity, selectionPane, menu))
+      : [];
+    if (replacements.length === 1) {
+      const replacement = replacements[0];
+      return select(replacement, items.indexOf(replacement), items.length, selectionPane);
+    }
+    clearSelection();
+    flash("Selection is no longer available.");
+    return false;
   }
 
   function smoothBehavior() {
@@ -256,16 +709,24 @@
     clearSelection();
     selected = button;
     pane = selectionPane;
+    if (staleSidebarFocus?.source !== button) clearStaleSidebarFocus();
     if (pane === "sidebar") {
       lastSidebarSelection = button;
       lastSidebarIdentity = elementIdentity(button);
     }
-    else if (pane === "menu") lastMenuSelection = button;
+    else if (pane === "menu") {
+      lastMenuSelection = button;
+      lastMenuIdentity = elementIdentity(button);
+    }
     else {
       lastMainSelection = button;
       lastMainIdentity = elementIdentity(button);
     }
     selected.classList.add(selectedClass);
+    selectedContextOwner = selectionContextOwner(selected, pane);
+    selectedContextOwnerClass = selectedContextClass;
+    selectedContextOwner?.classList.add(selectedContextClass);
+    if (pane === "menu") updateMenuActiveDescendant(selected);
     selected.scrollIntoView({ block: "center", inline: "nearest", behavior: smoothBehavior() });
     // Focusing Spotify menu items eagerly opens hover/focus submenus. Keep DOM
     // focus on the menu container while the extension highlights individual
@@ -274,12 +735,14 @@
     else selected.focus({ preventScroll: true });
     const label = elementLabel(selected);
     const title = pane === "sidebar" ? "Sidebar" : pane === "menu" ? "Actions" : "Main";
+    const hint = firstSelectionHintShown ? "" : " · Press ? for shortcuts.";
+    firstSelectionHintShown = true;
     const action = pane === "sidebar"
       ? "Enter opens"
       : pane === "menu"
         ? "j/k wrap · / playlist search · h/Esc close · l/Enter chooses"
         : "Enter or Space plays · a opens actions";
-    flash(`${title} ${index + 1}/${total}: ${label} — ${action}`);
+    flash(`${title} ${index + 1}/${total}: ${label} — ${action}${hint}`);
     return true;
   }
 
@@ -340,14 +803,33 @@
     return false;
   }
 
-  function waitForActionMenu(previousMenu = null, previousItems = [], timeout = 1200) {
+  function actionSignatures(items) {
+    return items.map((item) => [
+      item.getAttribute("role") || "",
+      elementLabel(item),
+      item.getAttribute("data-testid") || (item.id.startsWith("spotify-vim-menu-item-") ? "" : item.id) || "",
+      item.querySelector("a[href]")?.getAttribute("href") || ""
+    ].join("\u0001"));
+  }
+
+  function actionSetChanged(previousSignatures, menu) {
+    const next = actionSignatures(actionMenuItems(menu));
+    return next.length !== previousSignatures.length || next.some((signature, index) => signature !== previousSignatures[index]);
+  }
+
+  function waitForActionMenu(previousMenu = null, previousSignatures = [], timeout = 1200, onShell = null) {
+    let reportedShell = null;
     const changedMenu = () => {
       const current = activeActionMenu();
       if (!current) return null;
-      const currentItems = actionMenuItems(current);
-      const itemsChanged = currentItems.length !== previousItems.length ||
-        currentItems.some((item, index) => item !== previousItems[index]);
-      return current !== previousMenu || itemsChanged ? current : null;
+      const changed = current !== previousMenu || actionSetChanged(previousSignatures, current);
+      if (!changed) return null;
+      if (menuIsReady(current)) return current;
+      if (current !== reportedShell) {
+        reportedShell = current;
+        onShell?.(current);
+      }
+      return null;
     };
 
     const current = changedMenu();
@@ -358,7 +840,7 @@
         const next = changedMenu();
         if (next) finish(next);
       });
-      const timer = setTimeout(() => finish(null), timeout);
+      const timer = setTimeout(() => finish(changedMenu()), timeout);
       const finish = (menu) => {
         clearTimeout(timer);
         observer.disconnect();
@@ -368,7 +850,11 @@
         childList: true,
         subtree: true,
         attributes: true,
-        attributeFilter: ["aria-hidden", "class", "hidden", "style"]
+        characterData: true,
+        attributeFilter: [
+          "aria-hidden", "class", "hidden", "style", "aria-label", "aria-labelledby",
+          "role", "data-testid", "aria-disabled", "type", "placeholder"
+        ]
       });
     });
   }
@@ -395,6 +881,19 @@
     });
   }
 
+  function retainMenuShell(operation, menu, message) {
+    if (!(menu instanceof HTMLElement) || !operationIsCurrent(operation) || !setOperationMenu(operation, menu)) {
+      return false;
+    }
+    clearSelection();
+    pane = "menu";
+    lastMenuSelection = null;
+    lastMenuIdentity = null;
+    focusActionMenu(menu);
+    flash(message);
+    return true;
+  }
+
   function moreOptionsButton(item) {
     const row = item.closest('[role="row"]');
     const gridCell = item.closest('[role="gridcell"]');
@@ -413,13 +912,19 @@
       return;
     }
 
-    menuOriginPane = pane;
-    menuOriginSelection = selected;
-    menuOriginActionTarget = target;
+    const origin = captureMenuOrigin(target);
+    const operation = beginOperation(origin);
+    operation.awaitingMenu = true;
+    menuOriginPane = origin.pane;
+    menuOriginSelection = origin.selection;
+    menuOriginActionTarget = origin.actionTarget;
     lastMenuSelection = null;
 
-    const existingMenu = activeActionMenu();
+    operation.preExistingMenus = new Set([...document.querySelectorAll('[role="menu"]')].filter(visible));
+    operation.preOpenMenu = activeActionMenu();
+    const existingMenu = operation.preOpenMenu;
     const existingItems = actionMenuItems(existingMenu);
+    const existingSignatures = actionSignatures(existingItems);
     const more = moreOptionsButton(target);
     if (visible(more)) {
       more.click();
@@ -436,9 +941,34 @@
       }));
     }
 
-    const menu = await waitForActionMenu(existingMenu, existingItems);
-    if (!menu || !selectFirstActionMenuItem(menu)) {
+    const menu = await waitForActionMenu(existingMenu, existingSignatures, 1200, (shell) => {
+      if (!operationIsCurrent(operation) || operation.preExistingMenus.has(shell) ||
+        (operation.menu && operation.menu !== shell)) return;
+      retainMenuShell(operation, shell, "Action menu is still loading choices.");
+    });
+    if (!operationIsCurrent(operation)) return;
+    if (!(menu instanceof HTMLElement)) {
+      const shell = activeActionMenu();
+      if (shell instanceof HTMLElement && !operation.preExistingMenus.has(shell) &&
+        (!operation.menu || operation.menu === shell) &&
+        retainMenuShell(operation, shell, "Action menu is still loading choices.")) {
+        return;
+      }
+    }
+    const invalidMenu = !(menu instanceof HTMLElement) || operation.preExistingMenus.has(menu) ||
+      (operation.menu && operation.menu !== menu);
+    if (invalidMenu || !setOperationMenu(operation, menu)) {
+      operation.awaitingMenu = false;
+      supersedeOperations();
       flash("Spotify did not open an action menu for this item.");
+      return;
+    }
+    if (!selectFirstActionMenuItem(menu)) {
+      if (localActionMenuSearch(menu) && retainMenuShell(operation, menu, "Action menu search is ready.")) return;
+      supersedeOperations();
+      flash("Spotify did not open an action menu for this item.");
+    } else {
+      operation.menuItem = selected;
     }
   }
 
@@ -460,48 +990,91 @@
   }
 
   function activateMenuItem() {
-    if (!selectedIsUsable()) return;
     const previousMenu = menuForSelection();
+    const adoptedFocusedItem = adoptFocusedMenuItem(previousMenu);
+    if (!adoptedFocusedItem && !revalidateCurrentSelection("menu")) return;
+    if (!revalidateCurrentSelection("menu")) return;
+    if (!(previousMenu instanceof HTMLElement) || selected?.closest('[role="menu"]') !== previousMenu) return;
     const previousItems = actionMenuItems(previousMenu);
+    const previousSignatures = actionSignatures(previousItems);
     const previousSelection = selected;
+    const operation = beginOperation(rememberedMenuOrigin());
+    setOperationMenu(operation, previousMenu, previousSelection);
     const opensSubmenu = previousSelection.hasAttribute("aria-expanded");
 
     if (opensSubmenu) {
+      operation.allowMenuTransition = true;
       // Spotify exposes submenu entries via aria-expanded and opens them on
       // deliberate focus. Keeping focus out during j/k avoids opening them
       // merely because the highlight passed over the row.
       if (document.activeElement === previousSelection) previousSelection.blur();
       previousSelection.focus({ preventScroll: true });
-      waitForActionMenu(previousMenu, previousItems).then((nextMenu) => {
-        if (!nextMenu || nextMenu === previousMenu) {
-          const items = actionMenuItems(previousMenu);
-          const index = items.indexOf(previousSelection);
-          if (index >= 0) select(previousSelection, index, items.length, "menu");
+      waitForActionMenu(previousMenu, previousSignatures, 1200, (shell) => {
+        if (operationIsCurrent(operation) && (shell === previousMenu || shell === operation.menu || operation.allowMenuTransition)) {
+          operation.sawTransitionShell = true;
+          retainMenuShell(operation, shell, "Submenu is still loading choices.");
+        }
+      }).then((nextMenu) => {
+        if (!operationIsCurrent(operation)) return;
+        const changedInPlace = nextMenu === previousMenu && actionSetChanged(previousSignatures, nextMenu);
+        if (!nextMenu || (nextMenu === previousMenu && !changedInPlace)) {
+          const shell = activeActionMenu();
+          if (shell instanceof HTMLElement && (shell !== previousMenu || operation.sawTransitionShell) &&
+            (shell === previousMenu || shell === operation.menu || operation.allowMenuTransition) &&
+            retainMenuShell(operation, shell, "Submenu is still loading choices.")) return;
+          clearSelection();
+          pane = "menu";
+          focusActionMenu(previousMenu);
+          supersedeOperations();
           flash("Spotify did not open this submenu.");
           return;
         }
         lastMenuSelection = null;
-        selectFirstActionMenuItem(nextMenu);
+        if (!setOperationMenu(operation, nextMenu)) return;
+        if (selectFirstActionMenuItem(nextMenu)) operation.menuItem = selected;
+        else if (localActionMenuSearch(nextMenu)) retainMenuShell(operation, nextMenu, "Submenu search is ready.");
+        else {
+          clearSelection();
+          pane = "menu";
+          focusActionMenu(nextMenu);
+          supersedeOperations();
+          flash("Spotify did not open this submenu.");
+        }
       });
       return;
     }
 
     previousSelection.click();
     setTimeout(() => {
+      if (!operationIsCurrent(operation)) return;
+      if (activeActionMenu() && activeActionMenu() !== previousMenu) return;
       if (visible(previousMenu)) {
+        if (!menuOwnershipIntact(previousMenu)) {
+          relinquishMenuSelection();
+          return;
+        }
+        const focus = document.activeElement;
+        const focusedItem = focus instanceof Element
+          ? focus.closest('[role="menuitem"], [role="option"]')
+          : null;
+        if (!operationOwnsMenu(operation, previousMenu) ||
+          (focusedItem && focusedItem !== previousSelection) ||
+          (focus !== previousMenu && focus !== previousSelection)) return;
         const items = actionMenuItems(previousMenu);
         const index = items.indexOf(previousSelection);
         if (index >= 0) select(previousSelection, index, items.length, "menu");
         return;
       }
-      if (activeActionMenu()) closeActionMenus(true);
-      else restoreMenuOrigin();
+      // An action may replace its menu with a dialog or a follow-up menu. It
+      // now owns focus/keyboard handling; never close or restore behind it.
+      if (activeActionMenu() || !restoreIsSafe(operation)) return;
+      restoreMenuOrigin(operation.origin);
     }, 150);
   }
 
-  function restoreMenuOrigin() {
-    const originPane = menuOriginPane;
-    const originSelection = menuOriginSelection;
+  function restoreMenuOrigin(origin = { pane: menuOriginPane, selection: menuOriginSelection }) {
+    const originPane = origin.pane;
+    const originSelection = origin.selection;
     const items = originPane === "sidebar" ? sidebarItems() : playableButtons();
     const identity = originSelection
       ? (originPane === "sidebar" ? lastSidebarIdentity : lastMainIdentity)
@@ -533,21 +1106,28 @@
   }
 
   async function closeActionMenus(forwardEscape) {
+    const origin = rememberedMenuOrigin();
+    const operation = beginOperation(origin);
+    setOperationMenu(operation, menuForSelection(), selected);
     clearSelection();
     lastMenuSelection = null;
     if (forwardEscape) forwardEscapeToSpotify();
 
     if (await waitForActionMenusClosed()) {
-      restoreMenuOrigin();
+      if (operationIsCurrent(operation) && restoreIsSafe(operation)) restoreMenuOrigin(origin);
       return;
     }
 
-    const more = moreOptionsButton(menuOriginActionTarget);
+    if (!operationIsCurrent(operation)) return;
+    if (!operationOwnsMenu(operation)) return;
+    const more = moreOptionsButton(origin.actionTarget);
     if (more instanceof HTMLElement) more.click();
     if (await waitForActionMenusClosed(320)) {
-      restoreMenuOrigin();
+      if (operationIsCurrent(operation) && restoreIsSafe(operation)) restoreMenuOrigin(origin);
       return;
     }
+
+    if (!operationOwnsMenu(operation)) return;
 
     // Never return keyboard ownership to the sidebar/main pane while a Spotify
     // portal is still open. That was the cause of menu keystrokes appearing to
@@ -645,32 +1225,75 @@
     pendingGTimer = setTimeout(clearPendingG, 700);
   }
 
+  document.addEventListener("focusin", (event) => {
+    const focus = event.target;
+    if (staleSidebarFocus) {
+      if (staleSidebarFocus.source !== selected || unavailableNativeContext(focus)) {
+        clearStaleSidebarFocus();
+      } else if (!staleSidebarFocus.target && focus instanceof Element && focus !== selected) {
+        if (nativeInteractive(focus)) {
+          staleSidebarFocus.target = focus;
+          // The timeout only bounds acquisition of Spotify's post-click focus.
+          // Once that exact target is known, keep it until focus or ownership
+          // changes rather than expiring an otherwise valid recovery handoff.
+          clearTimeout(staleSidebarTimer);
+          staleSidebarTimer = 0;
+        }
+        else clearStaleSidebarFocus();
+      } else if (staleSidebarFocus.target && focus !== staleSidebarFocus.target) {
+        clearStaleSidebarFocus();
+      }
+    }
+    if (currentOperation && !operationAllowsFocus(currentOperation, focus)) {
+      // While an action portal is still mounting, foreign native focus takes
+      // ownership rather than leaving the origin row visually selected behind it.
+      if (currentOperation.awaitingMenu) clearSelection();
+      supersedeOperations();
+    }
+  }, true);
+
   document.addEventListener("keydown", (event) => {
     if (forwardingMenuEscape) return;
     if (event.isComposing || event.ctrlKey || event.metaKey) return;
     if (event.altKey && event.shiftKey && event.key.toLowerCase() === "v") {
       event.preventDefault();
+      event.stopImmediatePropagation();
       enabled = !enabled;
+      supersedeOperations();
+      clearStaleSidebarFocus();
       clearPendingG();
       clearSelection();
+      if (!enabled) closeHelp(true);
       flash(`Spotify Vim Navigation ${enabled ? "enabled" : "disabled"}.`, 1600);
+      return;
+    }
+    const help = document.getElementById(helpId);
+    if (help && (event.target === help || (event.target instanceof Node && help.contains(event.target)))) {
+      event.stopImmediatePropagation();
+      if (event.key === "Escape" || event.key === "?") {
+        event.preventDefault();
+        closeHelp();
+      } else if (["j", "k", "a", "l", "h", "g", "G", "H", "L", "/"].includes(event.key)) {
+        event.preventDefault();
+      }
       return;
     }
     if (event.defaultPrevented || event.altKey || !enabled) return;
 
     if (pane === "menu" && event.key === "Escape" && isEditable(event.target)) {
-      const menu = event.target instanceof Element
-        ? event.target.closest('[role="menu"]') || activeActionMenu()
-        : activeActionMenu();
-      if (menu) {
+      const menu = event.target instanceof Element ? event.target.closest('[role="menu"]') : null;
+      const ownsSearch = ownedMenuSearch?.search === event.target && ownedMenuSearch.menu === menuForSelection();
+      if ((menu && menu === menuForSelection()) || ownsSearch) {
         event.preventDefault();
         event.stopPropagation();
         clearPendingG();
-        const items = actionMenuItems(menu);
+        const ownedMenu = ownsSearch ? ownedMenuSearch.menu : menu;
+        const items = actionMenuItems(ownedMenu);
         const remembered = items.indexOf(lastMenuSelection);
         const index = remembered >= 0 ? remembered : 0;
         if (items.length > 0) select(items[index], index, items.length, "menu");
-        else focusActionMenu(menu);
+        else focusActionMenu(ownedMenu);
+        clearOwnedMenuSearch();
         return;
       }
     }
@@ -679,16 +1302,20 @@
     reconcilePane();
 
     // Spotify moves DOM focus to native controls such as "Your Library" when
-    // a library item opens. h/l have no native control behavior, so keep pane
-    // switching available even while that stale Spotify focus is present.
+    // a library item opens. Limit the recovery to that exact extension-owned
+    // handoff; dialogs and unrelated native controls retain their own keys.
     if (pane !== "menu" && (event.key === "h" || event.key === "l")) {
+      if (!canHandleShortcut(event) && !ownsStaleSidebarFocus()) return;
       event.preventDefault();
+      clearStaleSidebarFocus();
+      supersedeOperations();
       clearPendingG();
       focusPane(event.key === "h" ? "sidebar" : "main");
       return;
     }
 
     if (event.key === "A" && event.shiftKey) {
+      if (!canHandleShortcut(event)) return;
       event.preventDefault();
       clearPendingG();
       openNowPlayingActions();
@@ -698,6 +1325,7 @@
     if (!canHandleShortcut(event)) return;
 
     if (event.key === "Escape") {
+      supersedeOperations();
       if (pane === "menu") {
         clearPendingG();
         // Let the real Escape reach the focused Spotify menu. If Spotify's
@@ -717,6 +1345,10 @@
 
     if (event.key === "j" || event.key === "k") {
       event.preventDefault();
+      const pendingShell = pane === "menu" && currentOperation?.menu === activeActionMenu() &&
+        !menuIsReady(activeActionMenu());
+      if (!pendingShell) supersedeOperations();
+      clearStaleSidebarFocus();
       clearPendingG();
       const direction = event.key === "j" ? 1 : -1;
       if (pane === "sidebar") moveSidebarSelection(direction);
@@ -733,7 +1365,15 @@
     }
 
     if (pane === "menu" && (event.key === "l" || event.key === "Enter") && selected) {
+      // A real focused menu item wins over a stale visual highlight. A focused
+      // control outside the owned menu never reaches this branch.
+      if (!menuOwnershipIntact()) {
+        relinquishMenuSelection();
+        return;
+      }
+      if (!adoptFocusedMenuItem(menuForSelection()) && menuFocusState().kind !== "container") return;
       event.preventDefault();
+      event.stopImmediatePropagation();
       clearPendingG();
       activateMenuItem();
       return;
@@ -744,7 +1384,12 @@
       // the selected row here makes Enter open it reliably; playback remains
       // a real keyboard event on Spotify's native controls in the main pane.
       event.preventDefault();
+      event.stopImmediatePropagation();
       clearPendingG();
+      if (!revalidateCurrentSelection("sidebar")) return;
+      clearStaleSidebarFocus();
+      staleSidebarFocus = { source: selected, target: null };
+      staleSidebarTimer = setTimeout(clearStaleSidebarFocus, 500);
       selected.click();
       return;
     }
@@ -752,12 +1397,15 @@
     if (event.key === "a") {
       event.preventDefault();
       clearPendingG();
+      if ((pane === "main" || pane === "sidebar") && !revalidateCurrentSelection(pane)) return;
       openActions();
       return;
     }
 
     if (event.key === "/") {
       event.preventDefault();
+      supersedeOperations();
+      clearStaleSidebarFocus();
       clearPendingG();
       if (pane === "menu") focusActionMenuSearch();
       else focusSearch();
@@ -785,19 +1433,22 @@
 
     if (event.key === "H" && event.shiftKey) {
       event.preventDefault();
+      supersedeOperations();
       history.back();
       return;
     }
 
     if (event.key === "L" && event.shiftKey) {
       event.preventDefault();
+      supersedeOperations();
       history.forward();
       return;
     }
 
     if (event.key === "?") {
       event.preventDefault();
-      flash("h/l panes · j/k move · a selection actions · Shift+A now-playing actions · menus: j/k wrap, / search, h/Esc close, l/Enter choose · gg/G scroll · H/L history · Alt+Shift+V toggle", 7000);
+      event.stopImmediatePropagation();
+      openHelp();
     }
   }, true);
 })();
