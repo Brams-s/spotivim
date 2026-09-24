@@ -6,6 +6,10 @@
   border-radius: 999px !important;
 }
 
+[data-shelf="carousel"] [role="listitem"] > [role="button"].spotify-vim-selected-play {
+  border-radius: 8px !important;
+}
+
 .spotify-vim-selected-context {
   background: rgba(231, 181, 107, 0.08) !important;
   box-shadow: inset 3px 0 0 #e7b56b !important;

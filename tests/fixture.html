@@ -12,6 +12,10 @@
       button, input { min-height: 32px; }
       [role="menu"] { position: fixed; inset: 80px auto auto 300px; background: #292929; padding: 10px; z-index: 4; }
       [role="menuitem"] { display: block; margin: 4px; }
+      .fixture-shelf [role="grid"] { display: flex; }
+      .fixture-shelf [role="row"] { width: 140px; }
+      .fixture-shelf [role="listitem"] { height: 110px; }
+      .fixture-shelf [role="listitem"] > [role="button"] { display: block; width: 120px; height: 60px; }
       [hidden] { display: none !important; }
       .spacer { height: 800px; }
     </style>
@@ -73,6 +77,55 @@
           ? [row("spotify:track:uno", "Uno"), row("spotify:track:dos", "Dos")]
           : [row("spotify:track:dos", "Dos", true), row("spotify:track:cuatro", "Cuatro", true)]
         ));
+      }
+
+      function renderCardShelves() {
+        const shelf = (name, names) => {
+          const section = document.createElement("section");
+          section.className = "fixture-shelf";
+          section.dataset.shelf = "carousel";
+          section.setAttribute("aria-label", name);
+          const grid = document.createElement("div");
+          grid.setAttribute("role", "grid");
+          grid.tabIndex = 0;
+          for (const title of names) {
+            const cardRow = document.createElement("div");
+            cardRow.setAttribute("role", "row");
+            cardRow.tabIndex = -1;
+            const cell = document.createElement("div");
+            cell.setAttribute("role", "gridcell");
+            const card = document.createElement("div");
+            card.setAttribute("role", "listitem");
+            card.setAttribute("aria-labelledby", `card-title-spotify:playlist:${title}-0`);
+            const action = document.createElement("div");
+            action.setAttribute("role", "button");
+            action.tabIndex = 0;
+            action.setAttribute("aria-labelledby", `card-title-spotify:playlist:${title}-0`);
+            action.addEventListener("click", () => { document.body.dataset.openedCard = title; });
+            action.addEventListener("keydown", (event) => {
+              if (event.key === "Enter") action.click();
+            });
+            const heading = document.createElement("span");
+            heading.id = `card-title-spotify:playlist:${title}-0`;
+            heading.textContent = title;
+            const play = document.createElement("button");
+            play.dataset.testid = "play-button";
+            play.setAttribute("aria-label", `Play ${title}`);
+            play.addEventListener("click", () => { document.body.dataset.playedCard = title; });
+            card.addEventListener("contextmenu", (event) => { event.preventDefault(); openMenu(); });
+            card.append(action, heading, play);
+            cell.append(card);
+            cardRow.append(cell);
+            grid.append(cardRow);
+          }
+          section.append(grid);
+          return section;
+        };
+        tracks.replaceChildren(
+          shelf("Mixes", ["Alpha", "Beta", "Gamma"]),
+          shelf("Albums", ["Delta", "Epsilon"]),
+          row("spotify:track:after-shelves", "After Shelves")
+        );
       }
 
       function menuItem(label, action) {
@@ -325,6 +378,15 @@
 
       window.replaceTracks = () => render(false);
       window.fixtureSafety = {
+        renderCardShelves,
+        setCarouselRovingFocus() {
+          document.querySelectorAll(".fixture-shelf").forEach((section) => {
+            const firstRow = section.querySelector('[role="row"]');
+            section.querySelectorAll('[role="listitem"] > [role="button"]').forEach((action) => {
+              action.addEventListener("focus", () => firstRow.focus());
+            });
+          });
+        },
         recycleSelectedMain() {
           const play = document.querySelector("main .spotify-vim-selected-play");
           const row = play.closest('[role="row"]');

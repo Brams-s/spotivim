@@ -29,6 +29,8 @@
   let currentOperation = null;
   let staleSidebarFocus = null;
   let staleSidebarTimer = 0;
+  let cardFocusHandoff = null;
+  let cardFocusTimer = 0;
   let ownedMenuSearch = null;
   let menuAriaState = new WeakMap();
   let activeMenuAriaState = null;
@@ -65,23 +67,30 @@
     return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
   }
 
-  function playableButtons() {
+  function mainItems() {
     const main = document.querySelector("main");
     if (!(main instanceof HTMLElement)) return [];
 
-    // Spotify's older rows marked their play control with data-testid. Current
-    // grid rows omit that marker, but consistently place the play control in
-    // the first role=gridcell. Keep the old selector as a compatibility path.
+    // Carousel rows are cards, not track-list rows. Their small Play button is
+    // a secondary action; selecting it makes a horizontal shelf behave like a
+    // vertical list and leaves the card itself inaccessible from our keys.
     return [...main.querySelectorAll('[role="row"]')]
       .map((row) => {
+        if (row.closest('[data-shelf="carousel"]')) {
+          return row.querySelector('[role="listitem"] > [role="button"]');
+        }
         const explicit = row.querySelector('button[data-testid="play-button"]');
         if (explicit) return explicit;
-        // Current Spotify wraps track cells in a presentation div. Search the
-        // first gridcell in DOM order, never a later action cell.
+        // Track rows may wrap their cells in a presentation div. Never use a
+        // later action cell as a fallback play control.
         const firstCell = row.querySelector('[role="gridcell"]');
         return firstCell?.querySelector("button") || null;
       })
       .filter(visible);
+  }
+
+  function mainShelf(item) {
+    return item?.closest?.('[data-shelf="carousel"]') || null;
   }
 
   function sidebarItems() {
@@ -399,9 +408,9 @@
         <button type="button" data-spotify-vim-help-close>Close</button></div>
       <div class="spotify-vim-help-groups">
         <section><h3>Navigation</h3><dl>
-          <div><dt><kbd>h</kbd> / <kbd>l</kbd></dt><dd>Choose the library or main pane</dd></div>
-          <div><dt><kbd>j</kbd> / <kbd>k</kbd></dt><dd>Move the selection</dd></div>
-          <div><dt><kbd>Enter</kbd></dt><dd>Open the selected library item</dd></div>
+          <div><dt><kbd>h</kbd> / <kbd>l</kbd></dt><dd>Choose a pane or move across a card shelf</dd></div>
+          <div><dt><kbd>j</kbd> / <kbd>k</kbd></dt><dd>Move between shelves or through tracks</dd></div>
+          <div><dt><kbd>Enter</kbd></dt><dd>Open a selected card or library item</dd></div>
           <div><dt><kbd>/</kbd></dt><dd>Focus Spotify search</dd></div>
         </dl></section>
         <section><h3>Actions</h3><dl>
@@ -427,6 +436,7 @@
   }
 
   function clearSelection() {
+    clearCardFocusHandoff();
     selected?.classList.remove(selectedClass);
     clearSelectionContextOwner();
     if (activeMenuAriaState) cleanupMenuAriaState();
@@ -497,14 +507,25 @@
     staleSidebarTimer = 0;
   }
 
+  function clearCardFocusHandoff() {
+    cardFocusHandoff = null;
+    clearTimeout(cardFocusTimer);
+    cardFocusTimer = 0;
+  }
+
   function clearOwnedMenuSearch() {
     ownedMenuSearch = null;
   }
 
   function selectionOwnsEvent(event) {
     if (!selectedIsUsable()) return false;
+    if (cardFocusHandoff?.source === selected && cardFocusHandoff.target === document.activeElement &&
+      event.target === document.activeElement && !unavailableNativeContext(event.target)) return true;
     return [event.target, document.activeElement].some((element) =>
-      element instanceof Node && (element === selected || selected.contains(element))
+      element instanceof Node && (element === selected || selected.contains(element) ||
+        (mainShelf(selected) && element instanceof Element &&
+          (element === selected.closest('[role="row"]') ||
+            element === selected.closest('[role="grid"]'))))
     );
   }
 
@@ -639,6 +660,9 @@
     // play button is nested in a gridcell, while the stable track URI/link is
     // attached elsewhere on the enclosing row.
     const scope = element.closest('[role="row"]') || element.closest('[role="gridcell"]') || element;
+    const cardTitle = scope.querySelector('[role="listitem"]')?.getAttribute("aria-labelledby") || "";
+    const cardUri = cardTitle.match(/card-title-(spotify:(?:track|album|artist|playlist):[A-Za-z0-9]+)/)?.[1];
+    if (cardUri) return cardUri;
     const uri = scope.getAttribute("data-uri") || scope.querySelector("[data-uri]")?.getAttribute("data-uri");
     if (uri) return uri;
     const link = scope.querySelector('a[href*="/track/"], a[href*="/album/"], a[href*="/artist/"], a[href*="/playlist/"]');
@@ -669,7 +693,7 @@
       const menu = menuForSelection();
       return { items: actionMenuItems(menu), identity: lastMenuIdentity, menu };
     }
-    return { items: playableButtons(), identity: lastMainIdentity, menu: null };
+    return { items: mainItems(), identity: lastMainIdentity, menu: null };
   }
 
   function revalidateCurrentSelection(selectionPane = pane) {
@@ -732,31 +756,78 @@
     // focus on the menu container while the extension highlights individual
     // actions, then focus an item only when the user deliberately enters it.
     if (pane === "menu") focusActionMenu(button.closest('[role="menu"]'));
-    else selected.focus({ preventScroll: true });
+    else {
+      if (pane === "main" && mainShelf(selected)) {
+        cardFocusHandoff = { source: selected, target: null };
+        cardFocusTimer = setTimeout(clearCardFocusHandoff, 500);
+      }
+      selected.focus({ preventScroll: true });
+    }
     const label = elementLabel(selected);
-    const title = pane === "sidebar" ? "Sidebar" : pane === "menu" ? "Actions" : "Main";
+    const shelf = pane === "main" ? mainShelf(selected) : null;
+    const title = pane === "sidebar" ? "Sidebar" : pane === "menu" ? "Actions" : shelf ? "Shelf" : "Main";
+    const shelfItems = shelf ? mainItems().filter((item) => mainShelf(item) === shelf) : null;
     const hint = firstSelectionHintShown ? "" : " · Press ? for shortcuts.";
     firstSelectionHintShown = true;
     const action = pane === "sidebar"
       ? "Enter opens"
       : pane === "menu"
         ? "j/k wrap · / playlist search · h/Esc close · l/Enter chooses"
-        : "Enter or Space plays · a opens actions";
-    flash(`${title} ${index + 1}/${total}: ${label} — ${action}${hint}`);
+        : shelf ? "h/l cards · j/k shelves · Enter opens · a opens actions"
+          : "Enter or Space plays · a opens actions";
+    const position = shelf ? `${shelfItems.indexOf(selected) + 1}/${shelfItems.length}` : `${index + 1}/${total}`;
+    flash(`${title} ${position}: ${label} — ${action}${hint}`);
     return true;
   }
 
-  function moveSelection(direction) {
-    const buttons = playableButtons();
-    if (buttons.length === 0) {
-      flash("No playable tracks are visible yet.");
+  function moveMainSelection(direction) {
+    const items = mainItems();
+    if (items.length === 0) {
+      flash("No cards or playable tracks are visible yet.");
       return;
     }
-    const current = rememberedIndex(buttons, lastMainSelection, lastMainIdentity);
+    const current = rememberedIndex(items, lastMainSelection, lastMainIdentity);
+    const shelf = current >= 0 ? mainShelf(items[current]) : null;
+    if (shelf) {
+      const column = items.filter((item) => mainShelf(item) === shelf).indexOf(items[current]);
+      let next = current + direction;
+      while (next >= 0 && next < items.length && mainShelf(items[next]) === shelf) next += direction;
+      if (next < 0 || next >= items.length) {
+        flash("No more shelves or tracks in that direction.");
+        return;
+      }
+      const nextShelf = mainShelf(items[next]);
+      if (nextShelf) {
+        const nextItems = items.filter((item) => mainShelf(item) === nextShelf);
+        const target = nextItems[Math.min(column, nextItems.length - 1)];
+        select(target, items.indexOf(target), items.length, "main");
+      } else {
+        select(items[next], next, items.length, "main");
+      }
+      return;
+    }
     const next = current < 0
-      ? (direction > 0 ? 0 : buttons.length - 1)
-      : Math.max(0, Math.min(buttons.length - 1, current + direction));
-    select(buttons[next], next, buttons.length, "main");
+      ? (direction > 0 ? 0 : items.length - 1)
+      : Math.max(0, Math.min(items.length - 1, current + direction));
+    select(items[next], next, items.length, "main");
+  }
+
+  function moveShelfSelection(direction) {
+    if (!revalidateCurrentSelection("main")) return true;
+    const shelf = mainShelf(selected);
+    if (!shelf) return false;
+    const items = mainItems();
+    const shelfItems = items.filter((item) => mainShelf(item) === shelf);
+    const column = shelfItems.indexOf(selected);
+    if (direction < 0 && column === 0) return false; // h exits to the library.
+    const next = column + direction;
+    if (next >= shelfItems.length) {
+      flash("End of this shelf; use j/k to change shelves.");
+    } else {
+      const target = shelfItems[next];
+      select(target, items.indexOf(target), items.length, "main");
+    }
+    return true;
   }
 
   function moveSidebarSelection(direction) {
@@ -1075,7 +1146,7 @@
   function restoreMenuOrigin(origin = { pane: menuOriginPane, selection: menuOriginSelection }) {
     const originPane = origin.pane;
     const originSelection = origin.selection;
-    const items = originPane === "sidebar" ? sidebarItems() : playableButtons();
+    const items = originPane === "sidebar" ? sidebarItems() : mainItems();
     const identity = originSelection
       ? (originPane === "sidebar" ? lastSidebarIdentity : lastMainIdentity)
       : null;
@@ -1156,16 +1227,16 @@
       return;
     }
 
-    const buttons = playableButtons();
-    if (buttons.length === 0) {
+    const items = mainItems();
+    if (items.length === 0) {
       pane = "main";
       clearSelection();
       document.querySelector("main")?.focus({ preventScroll: true });
-      flash("Main content — no playable tracks are visible yet.");
+      flash("Main content — no cards or playable tracks are visible yet.");
       return;
     }
-    const index = Math.max(0, rememberedIndex(buttons, lastMainSelection, lastMainIdentity));
-    select(buttons[index], index, buttons.length, "main");
+    const index = Math.max(0, rememberedIndex(items, lastMainSelection, lastMainIdentity));
+    select(items[index], index, items.length, "main");
   }
 
   function focusSearch() {
@@ -1227,6 +1298,23 @@
 
   document.addEventListener("focusin", (event) => {
     const focus = event.target;
+    if (cardFocusHandoff) {
+      const { source, target } = cardFocusHandoff;
+      if (source !== selected || unavailableNativeContext(focus)) {
+        clearCardFocusHandoff();
+      } else if (!target && focus instanceof Element && focus !== source) {
+        // Spotify's carousel can move focus to its first row after we choose
+        // another column. Admit only the immediate same-grid handoff.
+        if (focus.matches('[role="row"], [role="grid"]') &&
+          focus.closest('[role="grid"]') === source.closest('[role="grid"]')) {
+          cardFocusHandoff.target = focus;
+          clearTimeout(cardFocusTimer);
+          cardFocusTimer = 0;
+        } else clearCardFocusHandoff();
+      } else if (target && focus !== target && focus !== source) {
+        clearCardFocusHandoff();
+      }
+    }
     if (staleSidebarFocus) {
       if (staleSidebarFocus.source !== selected || unavailableNativeContext(focus)) {
         clearStaleSidebarFocus();
@@ -1310,6 +1398,8 @@
       clearStaleSidebarFocus();
       supersedeOperations();
       clearPendingG();
+      if (pane === "main" && selectedIsUsable() && mainShelf(selected) &&
+        moveShelfSelection(event.key === "h" ? -1 : 1)) return;
       focusPane(event.key === "h" ? "sidebar" : "main");
       return;
     }
@@ -1353,7 +1443,7 @@
       const direction = event.key === "j" ? 1 : -1;
       if (pane === "sidebar") moveSidebarSelection(direction);
       else if (pane === "menu") moveMenuSelection(direction);
-      else moveSelection(direction);
+      else moveMainSelection(direction);
       return;
     }
 
@@ -1377,6 +1467,23 @@
       clearPendingG();
       activateMenuItem();
       return;
+    }
+
+    if (pane === "main" && mainShelf(selected) &&
+      (event.key === "Enter" || event.key === " " || event.key === "Spacebar")) {
+      if (!revalidateCurrentSelection("main")) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      // Spotify may have focused the first row of the grid rather than our
+      // highlighted card. A native Enter there would open the wrong card.
+      if (event.key === "Enter" && document.activeElement !== selected) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        selected.click();
+        return;
+      }
     }
 
     if (event.key === "Enter" && pane === "sidebar" && selected) {

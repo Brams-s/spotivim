@@ -214,4 +214,70 @@ done
 "${browser[@]}" press g >/dev/null
 "${browser[@]}" wait --fn 'document.querySelector("#main-scroll").scrollTop === 0' >/dev/null
 
+# Home shelves expose a full-card action and a separate small Play button.
+# h/l follow the row; j/k cross shelves without unexpectedly playing cards.
+"${browser[@]}" open "file://$script_dir/fixture.html" >/dev/null
+"${browser[@]}" wait --fn 'document.body.dataset.ready === "true"' >/dev/null
+"${browser[@]}" eval 'window.fixtureSafety.renderCardShelves()' >/dev/null
+"${browser[@]}" press l >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Alpha") && document.activeElement?.getAttribute("role") === "button"' >/dev/null
+"${browser[@]}" press l >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Beta") && !document.body.dataset.playedCard' >/dev/null
+"${browser[@]}" press j >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Epsilon")' >/dev/null
+"${browser[@]}" press h >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Delta")' >/dev/null
+"${browser[@]}" press h >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("nav .spotify-vim-selected-play")?.textContent === "Biblioteca Uno"' >/dev/null
+"${browser[@]}" press l >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Delta")' >/dev/null
+"${browser[@]}" press k >/dev/null
+"${browser[@]}" press l >/dev/null
+"${browser[@]}" press l >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Gamma")' >/dev/null
+"${browser[@]}" press l >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Gamma") && document.querySelector("#spotify-vim-navigation-status")?.textContent.includes("End of this shelf")' >/dev/null
+"${browser[@]}" press j >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Epsilon")' >/dev/null
+"${browser[@]}" press Enter >/dev/null
+"${browser[@]}" wait --fn 'document.body.dataset.openedCard === "Epsilon" && !document.body.dataset.playedCard' >/dev/null
+"${browser[@]}" press a >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("[role=menu] .spotify-vim-selected-play")?.textContent === "Agregar a la cola"' >/dev/null
+"${browser[@]}" press Escape >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Epsilon")' >/dev/null
+"${browser[@]}" eval 'document.querySelector(".fixture-shelf[aria-label=Albums] [role=grid]").focus()' >/dev/null
+"${browser[@]}" press k >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Beta")' >/dev/null
+"${browser[@]}" press j >/dev/null
+"${browser[@]}" press j >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-label") === "Reproducir After Shelves"' >/dev/null
+
+# Spotify's roving-focus manager can focus the first grid row even when our
+# selected card is in another column. The handoff keeps navigation and Enter
+# attached to the highlighted card, but releases unrelated native focus.
+"${browser[@]}" open "file://$script_dir/fixture.html" >/dev/null
+"${browser[@]}" wait --fn 'document.body.dataset.ready === "true"' >/dev/null
+"${browser[@]}" eval 'window.fixtureSafety.renderCardShelves(); window.fixtureSafety.setCarouselRovingFocus()' >/dev/null
+"${browser[@]}" press l >/dev/null
+"${browser[@]}" press l >/dev/null
+"${browser[@]}" wait --fn 'document.activeElement === document.querySelector(".fixture-shelf [role=row]") && document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Beta")' >/dev/null
+"${browser[@]}" press j >/dev/null
+"${browser[@]}" wait --fn 'document.activeElement === document.querySelector(".fixture-shelf[aria-label=Albums] [role=row]") && document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Epsilon")' >/dev/null
+"${browser[@]}" press Enter >/dev/null
+"${browser[@]}" wait --fn 'document.body.dataset.openedCard === "Epsilon" && !document.body.dataset.playedCard' >/dev/null
+"${browser[@]}" press h >/dev/null
+"${browser[@]}" wait --fn 'document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Delta")' >/dev/null
+"${browser[@]}" eval 'window.fixtureSafety.focusComposite()' >/dev/null
+"${browser[@]}" press l >/dev/null
+"${browser[@]}" wait --fn 'document.activeElement?.id === "fixture-composite" && document.querySelector("main .spotify-vim-selected-play")?.getAttribute("aria-labelledby")?.includes("Delta") && document.body.dataset.compositeKey === "l"' >/dev/null
+
+# A connected card repurposed by a shelf rerender must not open the replacement.
+"${browser[@]}" open "file://$script_dir/fixture.html" >/dev/null
+"${browser[@]}" wait --fn 'document.body.dataset.ready === "true"' >/dev/null
+"${browser[@]}" eval 'window.fixtureSafety.renderCardShelves()' >/dev/null
+"${browser[@]}" press l >/dev/null
+"${browser[@]}" eval 'const selected = document.querySelector("main .spotify-vim-selected-play"); selected.closest("[role=listitem]").setAttribute("aria-labelledby", "card-title-spotify:playlist:Changed-0"); selected.setAttribute("aria-labelledby", "card-title-spotify:playlist:Changed-0")' >/dev/null
+"${browser[@]}" press Enter >/dev/null
+"${browser[@]}" wait --fn '!document.body.dataset.openedCard && !document.querySelector("main .spotify-vim-selected-play") && document.querySelector("#spotify-vim-navigation-status")?.textContent.includes("no longer available")' >/dev/null
+
 printf 'Spotify Vim Navigation browser smoke tests passed.\n'

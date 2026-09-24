@@ -22,9 +22,9 @@ build cached.
 
 | Key | Action |
 | --- | --- |
-| `h` / `l` | Select the visible library / main-content pane |
-| `j` / `k` | Move selection down / up |
-| `Enter` | Open library item or choose an action-menu item |
+| `h` / `l` | Switch between library and main content; move left / right within a card shelf (`h` on its first card returns to the library) |
+| `j` / `k` | Move down / up through tracks or between card shelves, retaining the card column where possible |
+| `Enter` | Open a selected card or library item, or choose an action-menu item |
 | `a` | Open Spotify's action menu for the selection |
 | `Shift+A` | Open Spotify's action menu for the currently playing track or playlist context |
 | `/` | Focus Spotify search |
@@ -34,7 +34,8 @@ build cached.
 | `?` | Show this in-page help |
 | `Alt+Shift+V` | Toggle the extension on/off for the current tab |
 
-Inside an action menu, `j`/`k` wraps through available actions, `l` or `Enter`
+On a card shelf, `Enter` opens the highlighted card; on a track list, `Enter`
+or `Space` uses Spotify's Play button. Inside an action menu, `j`/`k` wraps through available actions, `l` or `Enter`
 chooses the highlighted action or enters its submenu, and `h` or `Esc` closes
 the menu and restores the originating item. In an **Add to playlist** submenu,
 `/` focuses its playlist search. Type the query, press `Esc` to return to the
@@ -46,8 +47,8 @@ change conflicts with a shortcut. The toggle resets when the page reloads.
 
 ## Scope and limitations
 
-- It navigates currently visible items; Spotify virtualizes long lists, so
-  newly rendered rows may need a fresh `j`/`k` selection.
+- It navigates rendered cards and track rows; Spotify virtualizes long lists,
+  so newly rendered rows may need a fresh selection.
 - Spotify controls its UI and can change it without notice. The extension is
   tested first against English Spotify Web; locale coverage is a release-gate
   test item, not a compatibility guarantee.
